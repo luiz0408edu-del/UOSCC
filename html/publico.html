@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Página Pública - UOSCC</title>
+    <link rel="stylesheet" href="../css/style.css">
+</head>
+
+<body>
+    <div class="main-container">
+        <div class="content">
+            <div class="page-header">
+                <div>
+                    <h1>Página pública de transparência</h1>
+                    <p>Consulte a destinação das contribuições pelo código fornecido pelo apoiador.</p>
+                </div>
+                <a class="btn" href="login.html">Entrar</a>
+            </div>
+            <form id="consulta-apoiador" class="public-lookup">
+                <label for="codigo-apoiador">Código de consulta</label>
+                <input id="codigo-apoiador" name="token" type="text" inputmode="text" pattern="[a-fA-F0-9]{32}" maxlength="32" autocomplete="off" aria-describedby="ajuda-codigo">
+                <button type="submit" class="btn">Consultar contribuição</button>
+                <small id="ajuda-codigo">Use o código ou link fornecido pelo apoiador.</small>
+            </form>
+            <div id="resultado-apoiador" aria-live="polite"></div>
+            <div id="conteudo-publico"
+                style="background: white; padding: 25px; border-radius: 8px; border: 1px solid var(--border-color);">
+            </div>
+        </div>
+    </div>
+    <script src="../js/layout.js"></script>
+    <script src="../js/app.js"></script>
+</body>
+
+</html>
