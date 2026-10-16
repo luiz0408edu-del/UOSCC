@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Configurações - UOSCC</title>
+    <link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+    <div class="main-container">
+        <div class="content">
+            <div class="page-header">
+                <div>
+                    <h1>Configurações</h1>
+                    <p>Personalize a aparência e a organização da sua área.</p>
+                </div>
+            </div>
+            <form id="preferences-form">
+                <section class="settings-section">
+                    <h2>Aparência</h2>
+                    <fieldset class="settings-theme">
+                        <legend>Tema</legend>
+                        <label><input type="radio" name="theme" value="light"> Claro</label>
+                        <label><input type="radio" name="theme" value="dark"> Escuro</label>
+                    </fieldset>
+                </section>
+                <section class="settings-section">
+                    <h2>Itens do menu</h2>
+                    <ul id="settings-menu" class="settings-list"></ul>
+                </section>
+                <section class="settings-section" id="settings-cards-section">
+                    <h2>Cartões do painel</h2>
+                    <ul id="settings-cards" class="settings-list"></ul>
+                </section>
+                <p id="preferences-status" role="status" aria-live="polite"></p>
+                <button type="submit" class="btn">Salvar configurações</button>
+            </form>
+        </div>
+    </div>
+    <script src="../js/layout.js"></script>
+    <script src="../js/app.js"></script>
+</body>
+</html>

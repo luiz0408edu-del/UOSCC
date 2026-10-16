@@ -4,7 +4,24 @@
     --bg-color: #F8F9FA;
     --text-color: #212529;
     --border-color: #DEE2E6;
+    --surface-color: #FFFFFF;
+    --surface-muted: #F8F9FA;
+    --muted-text: #6C757D;
+    --table-heading: #495057;
     --sidebar-width: 260px;
+}
+
+:root[data-theme="dark"] {
+    color-scheme: dark;
+    --primary: #7BC8A4;
+    --primary-light: #29483A;
+    --bg-color: #151A17;
+    --text-color: #E5ECE7;
+    --border-color: #3A4740;
+    --surface-color: #202823;
+    --surface-muted: #29332D;
+    --muted-text: #A8B3AC;
+    --table-heading: #D4DDD7;
 }
 
 * {
@@ -24,7 +41,7 @@ body {
 
 aside {
     width: var(--sidebar-width);
-    background-color: #ffffff;
+    background-color: var(--surface-color);
     border-right: 1px solid var(--border-color);
     display: flex;
     flex-direction: column;
@@ -42,7 +59,7 @@ aside {
 .sidebar-brand span {
     display: block;
     font-size: 0.75rem;
-    color: #6C757D;
+    color: var(--muted-text);
     font-weight: normal;
     margin-top: 2px;
 }
@@ -74,7 +91,7 @@ aside {
 .sidebar-section-title {
     font-size: 0.7rem;
     text-transform: uppercase;
-    color: #6C757D;
+    color: var(--muted-text);
     padding: 10px 15px;
     margin-top: 8px;
     letter-spacing: 0.5px;
@@ -89,7 +106,7 @@ aside {
 
 header.topbar {
     height: 60px;
-    background-color: #ffffff;
+    background-color: var(--surface-color);
     border-bottom: 1px solid var(--border-color);
     display: flex;
     align-items: center;
@@ -110,7 +127,7 @@ header.topbar {
 }
 
 .card {
-    background: #ffffff;
+    background: var(--surface-color);
     padding: 20px;
     border-radius: 8px;
     border: 1px solid var(--border-color);
@@ -118,7 +135,7 @@ header.topbar {
 
 .card h3 {
     font-size: 0.85rem;
-    color: #6C757D;
+    color: var(--muted-text);
     margin-bottom: 8px;
 }
 
@@ -131,7 +148,7 @@ header.topbar {
 table {
     width: 100%;
     border-collapse: collapse;
-    background: #ffffff;
+    background: var(--surface-color);
     border-radius: 8px;
     overflow: hidden;
     border: 1px solid var(--border-color);
@@ -147,9 +164,9 @@ table td {
 }
 
 table th {
-    background-color: #F8F9FA;
+    background-color: var(--surface-muted);
     font-weight: 600;
-    color: #495057;
+    color: var(--table-heading);
 }
 
 .btn {
@@ -180,7 +197,71 @@ table th {
 }
 
 .page-header p {
-    color: #6C757D;
+    color: var(--muted-text);
     font-size: 0.9rem;
     margin-top: 4px;
+}
+
+input,
+select,
+textarea {
+    background-color: var(--surface-color);
+    color: var(--text-color);
+    border-color: var(--border-color);
+}
+
+.account-form textarea {
+    padding: 10px;
+    border: 1px solid var(--border-color);
+    border-radius: 5px;
+    font: inherit;
+}
+
+.settings-section {
+    margin-top: 24px;
+}
+
+.settings-list {
+    list-style: none;
+    max-width: 760px;
+}
+
+.settings-list li {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.settings-list li label {
+    flex: 1;
+}
+
+.settings-list button {
+    padding: 6px 10px;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    color: var(--text-color);
+    background: var(--surface-color);
+    cursor: pointer;
+}
+
+.settings-theme {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 18px;
+}
+
+.report-output {
+    background: var(--surface-color);
+    padding: 25px;
+    border: 1px solid var(--border-color);
+}
+
+@media (max-width: 700px) {
+    .settings-list li {
+        flex-wrap: wrap;
+    }
 }

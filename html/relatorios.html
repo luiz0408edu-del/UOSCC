@@ -32,6 +32,27 @@
                 <button type="button" class="btn" id="exportar-csv">Exportar planilha</button>
                 <button type="button" class="btn" id="exportar-pdf">Exportar PDF</button>
             </form>
+            <section class="report-section">
+                <div class="page-header">
+                    <div>
+                        <h2>Registro de pessoas atendidas</h2>
+                        <p>Inclua ou remova quantidades por projeto e data, sem cadastrar dados pessoais.</p>
+                    </div>
+                    <button class="btn" type="button">Registrar atendimento</button>
+                </div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Ações</th>
+                            <th>Data</th>
+                            <th>Projeto</th>
+                            <th>Pessoas</th>
+                            <th>Observação</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tabela-pessoas"></tbody>
+                </table>
+            </section>
             <form id="report-note-form" class="report-note-form">
                 <label>Título do relatório
                     <input name="title" type="text" maxlength="200" required>
@@ -42,9 +63,7 @@
                 <p role="status" aria-live="polite"></p>
                 <button type="submit" class="btn">Salvar texto do relatório</button>
             </form>
-            <div id="relatorio-conteudo"
-                style="background: white; padding: 25px; border-radius: 8px; border: 1px solid var(--border-color);">
-            </div>
+            <div id="relatorio-conteudo" class="report-output"></div>
         </div>
     </div>
     <script src="../js/layout.js"></script>

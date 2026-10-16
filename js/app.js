@@ -17,6 +17,18 @@ async function apiRequest(params, options = {}) {
 window.apiRequest = apiRequest;
 
 let currentUser = null;
+let currentPreferences = {};
+
+const navigationItems = [
+    ['dashboard', 'Painel geral'], ['projetos', 'Projetos'], ['apoiadores', 'Apoiadores'],
+    ['financeiro', 'Recursos'], ['metas', 'Indicadores'], ['evidencias', 'Evidências'],
+    ['relatorios', 'Relatórios'], ['publico', 'Página pública'], ['apoiador', 'Meu apoio'],
+    ['contas', 'Acessos das OSCs'], ['configuracoes', 'Configurações'],
+];
+const dashboardItems = [
+    ['dinheiro', 'Dinheiro recebido'], ['voluntariado', 'Horas de voluntariado'],
+    ['pessoas', 'Pessoas atendidas'], ['metas', 'Metas concluídas'], ['evidencias', 'Evidências registradas'],
+];
 
 const OSC_AREAS = [
     'Educação e formação cidadã',
@@ -61,7 +73,7 @@ function addAppStyles() {
         .row-actions { display: flex; gap: 8px; white-space: nowrap; }
         .row-actions button { border: 0; background: none; color: var(--primary); cursor: pointer; font: inherit; text-decoration: underline; }
         .row-actions button[data-action="delete"] { color: #b02a37; }
-        .app-dialog { width: min(540px, calc(100% - 32px)); max-height: 90vh; margin: auto; padding: 24px; border: 1px solid var(--border-color); border-radius: 8px; color: var(--text-color); }
+        .app-dialog { width: min(540px, calc(100% - 32px)); max-height: 90vh; margin: auto; padding: 24px; border: 1px solid var(--border-color); border-radius: 8px; color: var(--text-color); background: var(--surface-color); }
         .app-dialog::backdrop { background: #17221dcc; }
         .app-dialog h2 { margin-bottom: 18px; font-size: 1.25rem; }
         .app-dialog form { display: grid; gap: 14px; }
@@ -69,10 +81,10 @@ function addAppStyles() {
         .app-dialog input, .app-dialog select, .app-dialog textarea { width: 100%; padding: 9px 10px; border: 1px solid var(--border-color); border-radius: 5px; font: inherit; }
         .app-dialog textarea { min-height: 78px; resize: vertical; }
         .app-dialog menu { display: flex; justify-content: flex-end; gap: 9px; margin-top: 8px; }
-        .app-dialog .btn-secondary { padding: 9px 14px; border: 1px solid var(--border-color); border-radius: 6px; background: white; cursor: pointer; }
-        .evidence-item { padding: 18px; background: white; border: 1px solid var(--border-color); border-radius: 6px; }
+        .app-dialog .btn-secondary { padding: 9px 14px; border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-color); background: var(--surface-color); cursor: pointer; }
+        .evidence-item { padding: 18px; background: var(--surface-color); border: 1px solid var(--border-color); border-radius: 6px; }
         .evidence-item h3 { margin-bottom: 8px; }
-        .evidence-item p { margin-top: 8px; color: #6c757d; }
+        .evidence-item p { margin-top: 8px; color: var(--muted-text); }
         .report-section { margin-top: 24px; }
         .report-section h2 { margin-bottom: 8px; font-size: 1.05rem; }
         .report-filters { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; margin: 18px 0; }
@@ -91,7 +103,8 @@ function addAppStyles() {
         .account-form label { display: grid; gap: 6px; font-weight: 600; }
         .account-form input, .account-form select { padding: 10px; border: 1px solid var(--border-color); border-radius: 5px; font: inherit; }
         .account-form [role="alert"] { color: #b02a37; }
-        .empty-state { padding: 18px; color: #6c757d; }
+        .theme-toggle { padding: 6px 12px; border: 1px solid var(--border-color); border-radius: 5px; background: var(--surface-color); color: var(--text-color); cursor: pointer; }
+        .empty-state { padding: 18px; color: var(--muted-text); }
         @media (max-width: 700px) { .app-dialog { padding: 18px; } .row-actions { flex-wrap: wrap; } }
         @media print { aside, header.topbar, .report-filters, #exportar-csv, #exportar-pdf { display: none !important; } body, .main-container, .content { display: block; height: auto; overflow: visible; padding: 0; background: white; } #relatorio-conteudo { border: 0 !important; padding: 0 !important; } table { break-inside: auto; } tr { break-inside: avoid; } }
     `;
@@ -123,12 +136,13 @@ const configs = {
             { name: 'date', label: 'Data', type: 'date', required: true },
             { name: 'project_id', label: 'Projeto', type: 'projects', required: true },
             { name: 'type', label: 'Tipo de recurso', type: 'select', options: ['Dinheiro', 'Material', 'Voluntariado'], required: true },
-            { name: 'quantity', label: 'Quantidade (R$ para dinheiro, horas para voluntariado)', type: 'number', min: 0, step: 'any', required: true },
+            { name: 'quantity', label: 'Quantidade (R$ para dinheiro, horas ou unidades)', type: 'number', min: 0, step: 'any', required: true },
             { name: 'supporter_id', label: 'Apoiador', type: 'supporters', required: false },
+            { name: 'indicator_id', label: 'Vincular ao indicador (opcional)', type: 'indicators', required: false },
             { name: 'usage', label: 'Como foi usado', type: 'textarea', required: false },
         ],
-        headers: ['Ações', 'Data', 'Projeto', 'Tipo', 'Quantidade', 'Apoiador', 'Como foi usado'],
-        row: (item) => [actions(item), escapeHTML(item.date), escapeHTML(item.project || '—'), escapeHTML(item.type), item.type === 'Dinheiro' ? money(item.quantity) : number(item.quantity), escapeHTML(item.supporter || '—'), escapeHTML(item.usage || '—')],
+        headers: ['Ações', 'Data', 'Projeto', 'Tipo', 'Quantidade', 'Apoiador', 'Indicador', 'Como foi usado'],
+        row: (item) => [actions(item), escapeHTML(item.date), escapeHTML(item.project || '—'), escapeHTML(item.type), item.type === 'Dinheiro' ? money(item.quantity) : number(item.quantity), escapeHTML(item.supporter || '—'), escapeHTML(item.indicator || '—'), escapeHTML(item.usage || '—')],
     },
     indicators: {
         button: 'Novo indicador', body: '#tabela-indicadores',
@@ -137,10 +151,22 @@ const configs = {
             { name: 'name', label: 'Indicador', required: true },
             { name: 'date', label: 'Data da medição', type: 'date', required: true },
             { name: 'target', label: 'Meta planejada', type: 'number', min: 0, step: 'any', required: true },
-            { name: 'achieved', label: 'Valor alcançado', type: 'number', min: 0, step: 'any', required: true },
+            { name: 'achieved', source: 'manualAchieved', label: 'Alcançado manualmente (antes dos recursos vinculados)', type: 'number', min: 0, step: 'any', required: true },
+            { name: 'people_when_met', label: 'Pessoas beneficiadas ao atingir a meta', type: 'number', min: 0, step: 1, required: true },
         ],
-        headers: ['Ações', 'Projeto', 'Indicador', 'Data', 'Meta', 'Alcançado', 'Progresso', 'Status'],
-        row: (item) => [actions(item), escapeHTML(item.project || '—'), escapeHTML(item.name), escapeHTML(item.date), number(item.target), number(item.achieved), `${number(item.progress)}%`, Number(item.achieved) >= Number(item.target) ? 'Concluído' : 'Em andamento'],
+        headers: ['Ações', 'Projeto', 'Indicador', 'Data', 'Meta', 'Alcançado', 'Pessoas previstas', 'Progresso', 'Status'],
+        row: (item) => [actions(item), escapeHTML(item.project || '—'), escapeHTML(item.name), escapeHTML(item.date), number(item.target), number(item.achieved), number(item.people_when_met), `${number(item.progress)}%`, Number(item.achieved) >= Number(item.target) ? 'Concluído' : 'Em andamento'],
+    },
+    people_served: {
+        button: 'Registrar atendimento', body: '#tabela-pessoas',
+        fields: [
+            { name: 'project_id', label: 'Projeto', type: 'projects', required: true },
+            { name: 'date', label: 'Data', type: 'date', required: true },
+            { name: 'quantity', label: 'Pessoas atendidas', type: 'number', min: 1, step: 1, required: true },
+            { name: 'description', label: 'Observação (até 500 caracteres)', type: 'textarea', required: false, maxLength: 500 },
+        ],
+        headers: ['Ações', 'Data', 'Projeto', 'Pessoas', 'Observação'],
+        row: (item) => [actions(item), escapeHTML(item.date), escapeHTML(item.project), number(item.quantity), escapeHTML(item.description || '—')],
     },
     evidences: {
         button: 'Nova evidência', body: '#grid-evidencias', cards: true,
@@ -159,17 +185,20 @@ function actions(item) {
     return `<div class="row-actions"><button type="button" data-action="edit" data-id="${Number(item.id)}">Editar</button><button type="button" data-action="delete" data-id="${Number(item.id)}">Excluir</button></div>`;
 }
 
-async function relatedOptions(type) {
-    if (type !== 'projects' && type !== 'supporters') return [];
-    return apiRequest({ entity: type });
+async function relatedOptions(type, projectId = null) {
+    if (!['projects', 'supporters', 'indicators'].includes(type)) return [];
+    return apiRequest({ entity: type, ...(type === 'indicators' && projectId ? { project_id: projectId } : {}) });
 }
 
-async function renderField(field, value, isEditing = false) {
+async function renderField(field, value, isEditing = false, projectId = null) {
     const required = field.required && !(field.type === 'file' && isEditing) ? 'required' : '';
     if (field.type === 'select' || field.type === 'projects' || field.type === 'supporters') {
         const options = field.options
             ? field.options.map((option) => `<option value="${escapeHTML(option)}" ${value === option ? 'selected' : ''}>${escapeHTML(option)}</option>`).join('')
-            : (await relatedOptions(field.type)).map((item) => `<option value="${item.id}" ${Number(value) === Number(item.id) ? 'selected' : ''}>${escapeHTML(item.name)}</option>`).join('');
+            : (await relatedOptions(field.type, projectId)).map((item) => {
+                const label = field.type === 'indicators' ? `${item.project} · ${item.name}` : item.name;
+                return `<option value="${item.id}" ${Number(value) === Number(item.id) ? 'selected' : ''}>${escapeHTML(label)}</option>`;
+            }).join('');
         const optional = !field.required ? '<option value="">Não informado</option>' : '';
         return `<label>${escapeHTML(field.label)}<select name="${field.name}" ${required}>${optional}${options}</select></label>`;
     }
@@ -178,7 +207,7 @@ async function renderField(field, value, isEditing = false) {
         return `<label>${escapeHTML(field.label)}<input type="file" name="file" accept="${accept}" ${required}></label>${value ? `<small>Arquivo atual: ${escapeHTML(value)}</small>` : ''}`;
     }
     if (field.type === 'textarea') {
-        return `<label>${escapeHTML(field.label)}<textarea name="${field.name}" ${required}>${escapeHTML(value || '')}</textarea></label>`;
+        return `<label>${escapeHTML(field.label)}<textarea name="${field.name}" ${required} ${field.maxLength ? `maxlength="${field.maxLength}"` : ''}>${escapeHTML(value || '')}</textarea></label>`;
     }
     const attrs = [
         `type="${field.type || 'text'}"`, `name="${field.name}"`, `value="${escapeHTML(value ?? '')}"`,
@@ -192,11 +221,19 @@ async function openEditor(entity, existing = null) {
     const fields = config.fields.filter((field) => !(currentUser?.role === 'osc' && (field.type === 'supporters' || (entity === 'projects' && field.name === 'organization'))));
     const dialog = document.createElement('dialog');
     dialog.className = 'app-dialog';
-    dialog.innerHTML = `<h2>${existing ? 'Editar' : 'Novo registro'}</h2><form>${(await Promise.all(fields.map((field) => renderField(field, existing?.[field.name], Boolean(existing))))).join('')}<p class="form-error" role="alert"></p><menu><button type="button" class="btn-secondary" data-cancel>Cancelar</button><button type="submit" class="btn">Salvar</button></menu></form>`;
+    dialog.innerHTML = `<h2>${existing ? 'Editar' : 'Novo registro'}</h2><form>${(await Promise.all(fields.map((field) => renderField(field, existing?.[field.source || field.name], Boolean(existing), existing?.project_id)))).join('')}<p class="form-error" role="alert"></p><menu><button type="button" class="btn-secondary" data-cancel>Cancelar</button><button type="submit" class="btn">Salvar</button></menu></form>`;
     document.body.append(dialog);
     dialog.showModal();
     dialog.querySelector('[data-cancel]').addEventListener('click', () => dialog.close());
     dialog.addEventListener('close', () => dialog.remove(), { once: true });
+    const projectSelect = dialog.querySelector('select[name="project_id"]');
+    const indicatorSelect = dialog.querySelector('select[name="indicator_id"]');
+    if (projectSelect && indicatorSelect) {
+        projectSelect.addEventListener('change', async () => {
+            const indicators = await relatedOptions('indicators', projectSelect.value);
+            indicatorSelect.innerHTML = '<option value="">Não informado</option>' + indicators.map((item) => `<option value="${item.id}">${escapeHTML(item.name)}</option>`).join('');
+        });
+    }
     dialog.querySelector('form').addEventListener('submit', async (event) => {
         event.preventDefault();
         const submit = dialog.querySelector('[type="submit"]');
@@ -224,6 +261,7 @@ async function openEditor(entity, existing = null) {
             dialog.close();
             await loadEntity(entity);
             if (entity === 'projects' || entity === 'supporters') await refreshRelatedViews();
+            if (entity === 'people_served' && document.getElementById('report-filters')) await loadReport();
         } catch (error) {
             dialog.querySelector('.form-error').textContent = error.message;
             submit.disabled = false;
@@ -277,6 +315,7 @@ function bindEntity(entity) {
             await apiRequest({ entity, id: item.id }, { method: 'DELETE' });
             await loadEntity(entity);
             if (entity === 'projects' || entity === 'supporters') await refreshRelatedViews();
+            if (entity === 'people_served' && document.getElementById('report-filters')) await loadReport();
         } catch (error) {
             notify(error.message);
         }
@@ -285,6 +324,7 @@ function bindEntity(entity) {
 
 async function loadDashboard() {
     const data = await apiRequest({ action: 'dashboard' });
+    applyDashboardPreferences();
     document.getElementById('card-dinheiro').textContent = money(data.money);
     document.getElementById('card-voluntariado').textContent = `${number(data.volunteer)} h`;
     document.getElementById('card-pessoas').textContent = number(data.people);
@@ -326,10 +366,19 @@ async function loadReport() {
         + reportTable('Projetos', ['Projeto', 'OSC', 'Indicadores', 'Recebido'], report.projects.map((item) => [item.name, item.organization, number(item.indicators), money(item.received)]))
         + reportTable('Recursos', ['Data', 'Projeto', 'Tipo', 'Quantidade', 'Apoiador', 'Uso'], report.resources.map((item) => [item.date, item.project || '—', item.type, item.type === 'Dinheiro' ? money(item.quantity) : number(item.quantity), item.supporter || '—', item.usage || '—']))
         + reportTable('Indicadores', ['Data', 'Projeto', 'Indicador', 'Meta', 'Alcançado'], report.indicators.map((item) => [item.date, item.project || '—', item.name, number(item.target), number(item.achieved)]))
+        + reportTable('Pessoas atendidas', ['Data', 'Projeto', 'Quantidade', 'Observação'], report.peopleServed.map((item) => [item.date, item.project, number(item.quantity), item.description || '—']))
         + reportTable('Evidências', ['Data', 'Projeto', 'Título', 'Tipo'], report.evidences.map((item) => [item.date, item.project || '—', item.title, item.type]));
 }
 
 async function loadPublicPage() {
+    const accountLink = document.getElementById('link-conta');
+    const session = await apiRequest({ action: 'me' });
+    if (session.user) {
+        currentPreferences = await apiRequest({ action: 'preferences' });
+        applyThemePreference();
+        accountLink.href = session.user.role === 'supporter' ? 'apoiador.html' : 'dashboard.html';
+        accountLink.textContent = session.user.role === 'supporter' ? 'Meu apoio' : 'Painel geral';
+    }
     const form = document.getElementById('consulta-apoiador');
     const tokenField = form.elements.token;
     const result = document.getElementById('resultado-apoiador');
@@ -370,26 +419,198 @@ async function loadPublicPage() {
 async function loadSupporterPage() {
     const data = await apiRequest({ action: 'supporter-dashboard' });
     const container = document.getElementById('acompanhamento-apoiador');
-    container.innerHTML = `<p>${number(data.total)} contribuições registradas</p>${reportTable('Minhas contribuições e voluntariado', ['Data', 'Projeto', 'Tipo', 'Quantidade', 'Destinação'], data.resources.map((item) => [item.date, item.project || 'Aguardando vínculo', item.type, item.type === 'Dinheiro' ? money(item.quantity) : number(item.quantity), item.usage || 'Sem descrição']))}`;
+    const form = document.getElementById('support-request-form');
+    form.elements.name.value = data.name;
+    form.elements.project_id.innerHTML = '<option value="">Selecione um projeto</option>' + data.projects.map((project) => `<option value="${project.id}">${escapeHTML(project.name)} · ${escapeHTML(project.organization)}</option>`).join('');
+    const updateIndicators = () => {
+        const indicators = data.indicators.filter((item) => Number(item.project_id) === Number(form.elements.project_id.value));
+        form.elements.indicator_id.innerHTML = '<option value="">Sem vínculo</option>' + indicators.map((item) => `<option value="${item.id}">${escapeHTML(item.name)}</option>`).join('');
+    };
+    form.elements.project_id.addEventListener('change', updateIndicators);
+    updateIndicators();
+    form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const button = form.querySelector('[type="submit"]');
+        button.disabled = true;
+        form.querySelector('[role="alert"]').textContent = '';
+        try {
+            await apiRequest({ action: 'submit-support-request' }, { method: 'POST', body: new FormData(form) });
+            form.reset();
+            form.elements.name.value = data.name;
+            updateIndicators();
+            notify('Pedido enviado para análise da UOSCC ou da OSC.');
+            await loadSupporterPageData(await apiRequest({ action: 'supporter-dashboard' }));
+        } catch (error) {
+            form.querySelector('[role="alert"]').textContent = error.message;
+        } finally {
+            button.disabled = false;
+        }
+    });
+    await loadSupporterPageData(data);
+}
+
+async function loadSupporterPageData(data) {
+    const resources = document.getElementById('supporter-resources');
+    resources.innerHTML = `<p>${number(data.total)} contribuições aprovadas</p>${reportTable('Minhas contribuições e voluntariado', ['Data', 'Projeto', 'Tipo', 'Quantidade', 'Destinação'], data.resources.map((item) => [item.date, item.project || 'Aguardando vínculo', item.type, item.type === 'Dinheiro' ? money(item.quantity) : number(item.quantity), item.usage || 'Sem descrição']))}`;
+    const requests = document.getElementById('supporter-requests');
+    const statusLabels = { pending: 'Aguardando análise', approved: 'Aprovado', rejected: 'Não aprovado' };
+    requests.innerHTML = data.requests.length ? `<table><thead><tr><th>Enviado em</th><th>Projeto</th><th>Tipo</th><th>Quantidade</th><th>Status</th><th>Comprovante</th></tr></thead><tbody>${data.requests.map((item) => `<tr><td>${escapeHTML(item.created_at)}</td><td>${escapeHTML(item.project)}</td><td>${escapeHTML(item.type)}</td><td>${item.type === 'Dinheiro' ? money(item.quantity) : number(item.quantity)}</td><td>${statusLabels[item.status] || escapeHTML(item.status)}</td><td><a href="${escapeHTML(item.evidence_url)}" target="_blank" rel="noopener">Abrir</a></td></tr>`).join('')}</tbody></table>` : '<p class="empty-state">Nenhum pedido enviado.</p>';
+}
+
+async function loadSupportRequests() {
+    const container = document.getElementById('support-requests');
+    const requests = await apiRequest({ action: 'support-requests' });
+    container.innerHTML = requests.length ? `<table><thead><tr><th>Apoiador</th><th>Projeto / OSC</th><th>Tipo</th><th>Quantidade</th><th>Descrição</th><th>Comprovante</th><th>Análise</th></tr></thead><tbody>${requests.map((item) => `<tr><td>${escapeHTML(item.supporter)}</td><td>${escapeHTML(item.project)}<br><small>${escapeHTML(item.organization)}</small></td><td>${escapeHTML(item.type)}</td><td>${item.type === 'Dinheiro' ? money(item.quantity) : number(item.quantity)}</td><td>${escapeHTML(item.description || '—')}${item.indicator ? `<br><small>Indicador: ${escapeHTML(item.indicator)}</small>` : ''}</td><td><a href="${escapeHTML(item.evidence_url)}" target="_blank" rel="noopener">Abrir</a></td><td><button type="button" data-request-id="${Number(item.id)}" data-decision="approve">Aprovar</button> <button type="button" data-request-id="${Number(item.id)}" data-decision="reject">Rejeitar</button></td></tr>`).join('')}</tbody></table>` : '<p class="empty-state">Nenhum pedido pendente.</p>';
+}
+
+function bindSupportRequests() {
+    const container = document.getElementById('support-requests');
+    container.addEventListener('click', async (event) => {
+        const button = event.target.closest('[data-decision]');
+        if (!button) return;
+        button.disabled = true;
+        try {
+            await apiRequest({ action: 'review-support-request' }, { method: 'POST', body: JSON.stringify({ id: button.dataset.requestId, decision: button.dataset.decision }) });
+            await loadSupportRequests();
+            await loadEntity('resources');
+            if (document.getElementById('card-dinheiro')) await loadDashboard();
+            notify(button.dataset.decision === 'approve' ? 'Apoio aprovado e contabilizado.' : 'Pedido rejeitado.');
+        } catch (error) {
+            button.disabled = false;
+            notify(error.message);
+        }
+    });
 }
 
 function setRoleNavigation(user) {
     const permissions = user.role === 'admin'
-        ? ['dashboard', 'financeiro', 'metas', 'evidencias', 'projetos', 'apoiadores', 'relatorios', 'publico', 'contas']
+        ? ['dashboard', 'projetos', 'apoiadores', 'financeiro', 'metas', 'evidencias', 'relatorios', 'publico', 'contas', 'configuracoes']
         : user.role === 'osc'
-            ? ['dashboard', 'financeiro', 'metas', 'evidencias', 'projetos', 'relatorios', 'publico']
-            : ['apoiador', 'publico'];
+            ? ['dashboard', 'projetos', 'financeiro', 'metas', 'evidencias', 'relatorios', 'publico', 'configuracoes']
+            : ['apoiador', 'publico', 'configuracoes'];
     document.querySelectorAll('.sidebar-menu a[data-role-page]').forEach((link) => {
-        link.hidden = !permissions.includes(link.dataset.rolePage);
+        const key = link.dataset.rolePage;
+        link.hidden = !permissions.includes(key) || (key !== 'configuracoes' && (currentPreferences.hiddenMenu || []).includes(key));
     });
-    document.querySelectorAll('.sidebar-section-title').forEach((label) => {
-        let item = label.nextElementSibling;
-        let visibleLink = false;
-        while (item && !item.classList.contains('sidebar-section-title')) {
-            visibleLink ||= Boolean(item.querySelector('a:not([hidden])'));
-            item = item.nextElementSibling;
+    const menu = document.querySelector('.sidebar-menu');
+    const defaultOrder = navigationItems.map(([key]) => key);
+    const order = [...new Set([...(currentPreferences.menuOrder || []), ...defaultOrder])].filter((key) => permissions.includes(key));
+    for (const key of order) {
+        const link = menu.querySelector(`[data-role-page="${key}"]`);
+        if (link) menu.append(link.closest('li'));
+    }
+    applyThemePreference();
+    applyDashboardPreferences();
+    const themeToggle = document.getElementById('theme-toggle');
+    if (themeToggle && !themeToggle.dataset.bound) {
+        themeToggle.dataset.bound = 'true';
+        themeToggle.addEventListener('click', async () => {
+            currentPreferences.theme = currentPreferences.theme === 'dark' ? 'light' : 'dark';
+            applyThemePreference();
+            try {
+                currentPreferences = await apiRequest({ action: 'preferences' }, { method: 'POST', body: JSON.stringify(currentPreferences) });
+            } catch (error) {
+                notify(error.message);
+            }
+        });
+    }
+}
+
+function applyThemePreference() {
+    const theme = currentPreferences.theme === 'dark' ? 'dark' : 'light';
+    document.documentElement.dataset.theme = theme;
+    const button = document.getElementById('theme-toggle');
+    if (button) button.textContent = theme === 'dark' ? 'Tema claro' : 'Tema escuro';
+}
+
+function applyDashboardPreferences() {
+    const container = document.getElementById('dashboard-cards');
+    if (!container) return;
+    const hidden = currentPreferences.hiddenCards || [];
+    const defaultOrder = dashboardItems.map(([key]) => key);
+    const order = [...new Set([...(currentPreferences.cardOrder || []), ...defaultOrder])];
+    for (const key of order) {
+        const card = container.querySelector(`[data-dashboard-card="${key}"]`);
+        if (card) {
+            card.hidden = hidden.includes(key);
+            container.append(card);
         }
-        label.hidden = !visibleLink;
+    }
+}
+
+function settingsList(items, list, hiddenItems = [], order = [], allowHide = true) {
+    const defaultOrder = items.map(([key]) => key);
+    const orderedItems = [...new Set([...order, ...defaultOrder])].filter((key) => defaultOrder.includes(key));
+    list.replaceChildren(...orderedItems.map((key) => {
+        const [, label] = items.find(([itemKey]) => itemKey === key);
+        const row = document.createElement('li');
+        row.dataset.settingKey = key;
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.checked = !hiddenItems.includes(key);
+        checkbox.disabled = !allowHide || key === 'configuracoes';
+        checkbox.dataset.visibility = '';
+        const text = document.createElement('label');
+        text.append(checkbox, document.createTextNode(` ${label}`));
+        const up = document.createElement('button');
+        up.type = 'button';
+        up.dataset.move = '-1';
+        up.setAttribute('aria-label', `Mover ${label} para cima`);
+        up.textContent = 'Subir';
+        const down = document.createElement('button');
+        down.type = 'button';
+        down.dataset.move = '1';
+        down.setAttribute('aria-label', `Mover ${label} para baixo`);
+        down.textContent = 'Descer';
+        row.append(text, up, down);
+        return row;
+    }));
+    list.addEventListener('click', (event) => {
+        const button = event.target.closest('[data-move]');
+        if (!button) return;
+        const row = button.closest('li');
+        if (button.dataset.move === '-1' && row.previousElementSibling) list.insertBefore(row, row.previousElementSibling);
+        if (button.dataset.move === '1' && row.nextElementSibling) list.insertBefore(row.nextElementSibling, row);
+    });
+}
+
+function loadSettingsPage() {
+    const allowedPages = currentUser.role === 'admin'
+        ? ['dashboard', 'projetos', 'apoiadores', 'financeiro', 'metas', 'evidencias', 'relatorios', 'publico', 'contas', 'configuracoes']
+        : currentUser.role === 'osc'
+            ? ['dashboard', 'projetos', 'financeiro', 'metas', 'evidencias', 'relatorios', 'publico', 'configuracoes']
+            : ['apoiador', 'publico', 'configuracoes'];
+    const menuItems = navigationItems.filter(([key]) => allowedPages.includes(key));
+    const menuOrder = currentPreferences.menuOrder || [];
+    const menuList = document.getElementById('settings-menu');
+    settingsList(menuItems, menuList, currentPreferences.hiddenMenu || [], menuOrder);
+    if (currentUser.role === 'supporter') document.getElementById('settings-cards-section').hidden = true;
+    else settingsList(dashboardItems, document.getElementById('settings-cards'), currentPreferences.hiddenCards || [], currentPreferences.cardOrder || []);
+    const theme = currentPreferences.theme === 'dark' ? 'dark' : 'light';
+    document.querySelector(`input[name="theme"][value="${theme}"]`).checked = true;
+    const form = document.getElementById('preferences-form');
+    const status = document.getElementById('preferences-status');
+    form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const collectOrder = (listId) => [...document.querySelectorAll(`#${listId} [data-setting-key]`)].map((row) => row.dataset.settingKey);
+        const collectHidden = (listId) => [...document.querySelectorAll(`#${listId} [data-setting-key]`)]
+            .filter((row) => !row.querySelector('[data-visibility]').checked)
+            .map((row) => row.dataset.settingKey);
+        const cardList = document.getElementById('settings-cards');
+        const preferences = {
+            theme: new FormData(form).get('theme'),
+            menuOrder: collectOrder('settings-menu'),
+            hiddenMenu: collectHidden('settings-menu'),
+            cardOrder: currentUser.role === 'supporter' ? currentPreferences.cardOrder || [] : collectOrder('settings-cards'),
+            hiddenCards: currentUser.role === 'supporter' ? currentPreferences.hiddenCards || [] : collectHidden('settings-cards'),
+        };
+        try {
+            currentPreferences = await apiRequest({ action: 'preferences' }, { method: 'POST', body: JSON.stringify(preferences) });
+            setRoleNavigation(currentUser);
+            status.textContent = 'Configurações salvas.';
+        } catch (error) {
+            status.textContent = error.message;
+        }
     });
 }
 
@@ -424,6 +645,7 @@ function exportReportCsv() {
     if (report.reportNote) rows.push(['Relatório', `${report.filters.from} a ${report.filters.to}`, report.filters.organization || 'Todas as OSCs', report.reportNote.title, '', '', '', report.reportNote.narrative]);
     report.resources.forEach((item) => rows.push(['Recurso', item.date, item.project, item.type, item.type, '', item.quantity, item.usage]));
     report.indicators.forEach((item) => rows.push(['Indicador', item.date, item.project, item.name, '', item.target, item.achieved, '']));
+    report.peopleServed.forEach((item) => rows.push(['Atendimento', item.date, item.project, item.description, 'Pessoas', '', item.quantity, '']));
     report.evidences.forEach((item) => rows.push(['Evidência', item.date, item.project, item.title, item.type, '', '', item.description]));
     const csv = rows.map((row) => row.map((cell) => {
         let value = String(cell ?? '');
@@ -494,11 +716,12 @@ async function initialize() {
             return;
         }
         currentUser = current.user;
-        if (currentUser.role === 'supporter' && page !== 'apoiador.html') {
-            window.location.href = 'apoiador.html';
+        if (currentUser.role === 'supporter' && !['apoiador.html', 'configuracoes.html'].includes(page)) {
+            const content = document.querySelector('.content');
+            content.innerHTML = '<div class="page-header"><div><h1>Área restrita</h1><p>Esta página contém ferramentas de gestão. Você pode acompanhar seus pedidos ou consultar a transparência pública.</p><p><a class="btn" href="apoiador.html">Meu apoio</a> <a class="btn" href="publico.html">Página pública</a></p></div></div>';
             return;
         }
-        const oscPages = ['dashboard.html', 'financeiro.html', 'metas.html', 'evidencias.html', 'projetos.html', 'relatorios.html'];
+        const oscPages = ['dashboard.html', 'financeiro.html', 'metas.html', 'evidencias.html', 'projetos.html', 'relatorios.html', 'configuracoes.html'];
         if (currentUser.role === 'osc' && !oscPages.includes(page)) {
             window.location.href = 'dashboard.html';
             return;
@@ -507,10 +730,12 @@ async function initialize() {
             window.location.href = 'dashboard.html';
             return;
         }
+        currentPreferences = await apiRequest({ action: 'preferences' });
         setRoleNavigation(currentUser);
     }
 
     if (isPublic) return loadPublicPage();
+    if (page === 'configuracoes.html') return loadSettingsPage();
     if (page === 'apoiador.html') return loadSupporterPage();
     if (page === 'dashboard.html') return loadDashboard();
     if (page === 'contas.html') {
@@ -521,6 +746,8 @@ async function initialize() {
         return bindOSCAccountForm();
     }
     if (page === 'relatorios.html') {
+        bindEntity('people_served');
+        await loadEntity('people_served');
         document.getElementById('report-filters').addEventListener('submit', (event) => {
             event.preventDefault();
             loadReport().catch((error) => notify(error.message));
@@ -553,6 +780,10 @@ async function initialize() {
     if (entity) {
         bindEntity(entity);
         await loadEntity(entity);
+        if (entity === 'resources') {
+            bindSupportRequests();
+            await loadSupportRequests();
+        }
     }
 }
 

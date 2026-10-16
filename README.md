@@ -9,7 +9,7 @@ mysql -e "CREATE DATABASE uoscc CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
 export UOSCC_DB_DSN='mysql:host=127.0.0.1;dbname=uoscc;charset=utf8mb4'
 export UOSCC_DB_USER='uoscc'
 export UOSCC_DB_PASSWORD='sua-senha-do-banco'
-php UOSCC/php/setup.php admin@example.org 'uma-senha-forte-com-12-caracteres'
+php php/setup.php admin@example.org 'uma-senha-forte-com-12-caracteres'
 ```
 
 O instalador cria as tabelas usando `UOSCC/php/schema.sql` e configura ou atualiza a conta administrativa. A senha da conta deve ter pelo menos 12 caracteres.
@@ -28,13 +28,13 @@ As seis áreas são educação e formação cidadã, meio ambiente e sustentabil
 Sem `UOSCC_DB_DSN`, o projeto usa SQLite em `var/uoscc.sqlite`, fora da pasta pública:
 
 ```sh
-php UOSCC/php/setup.php admin@example.org 'uma-senha-forte-com-12-caracteres'
+php php/setup.php admin@example.org 'uma-senha-forte-com-12-caracteres'
 ```
 
 Inicie o servidor PHP com a pasta do projeto como raiz pública:
 
 ```sh
-php -S localhost:8000 -t UOSCC
+php -S localhost:8000 -t .
 ```
 
 Abra `http://localhost:8000/` para a transparência pública ou `http://localhost:8000/html/login.html` para entrar. Para SQLite em outro local, configure `UOSCC_DB_PATH`.
