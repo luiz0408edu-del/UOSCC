@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Acessos das OSCs - UOSCC</title>
+    <link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+    <div class="main-container">
+        <div class="content">
+            <div class="page-header">
+                <div>
+                    <h1>Criar acesso de OSC</h1>
+                    <p>Vincule uma conta à área de atuação correspondente.</p>
+                </div>
+            </div>
+            <form id="form-conta-osc" class="account-form">
+                <label>Área de atuação
+                    <select name="name" required>
+                        <option value="">Selecione uma área</option>
+                        <option>Educação e formação cidadã</option>
+                        <option>Meio ambiente e sustentabilidade</option>
+                        <option>Saúde e bem-estar comunitário</option>
+                        <option>Assistência social e apoio às famílias</option>
+                        <option>Direitos humanos e inclusão social</option>
+                        <option>Cultura, esporte e lazer</option>
+                    </select>
+                </label>
+                <label>E-mail de acesso
+                    <input name="email" type="email" autocomplete="email" required>
+                </label>
+                <label>Senha inicial (mínimo 12 caracteres)
+                    <input name="password" type="password" minlength="12" autocomplete="new-password" required>
+                </label>
+                <p role="alert"></p>
+                <button type="submit" class="btn">Criar conta</button>
+            </form>
+            <section class="report-section">
+                <h2>Criar acesso de administrador UOSCC</h2>
+                <form id="form-conta-admin" class="account-form">
+                    <label>E-mail de acesso
+                        <input name="email" type="email" autocomplete="email" required>
+                    </label>
+                    <label>Senha inicial (mínimo 12 caracteres)
+                        <input name="password" type="password" minlength="12" autocomplete="new-password" required>
+                    </label>
+                    <p role="alert"></p>
+                    <button type="submit" class="btn">Criar administrador</button>
+                </form>
+            </section>
+        </div>
+    </div>
+    <script src="../js/layout.js"></script>
+    <script src="../js/app.js"></script>
+</body>
+</html>

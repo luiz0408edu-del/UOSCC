@@ -1,0 +1,2 @@
+SetEnv UOSCC_DB_DSN "mysql:host=127.0.0.1;dbname=uoscc;charset=utf8mb4"
+SetEnv UOSCC_DB_USER root
