@@ -19,11 +19,15 @@ window.apiRequest = apiRequest;
 let currentUser = null;
 let currentPreferences = {};
 
-const navigationItems = [
-    ['dashboard', 'Painel geral'], ['projetos', 'Projetos'], ['apoiadores', 'Apoiadores'],
-    ['financeiro', 'Recursos'], ['metas', 'Indicadores'], ['evidencias', 'Evidências'],
-    ['relatorios', 'Relatórios'], ['publico', 'Página pública'], ['apoiador', 'Meu apoio'],
-    ['contas', 'Acessos das OSCs'], ['configuracoes', 'Configurações'],
+const navigationGroups = [
+    ['menu', 'Menu', [['apoiador', 'Meu apoio'], ['dashboard', 'Painel geral']]],
+    ['gestao', 'Gestão', [
+        ['projetos', 'Projetos'], ['apoiadores', 'Apoiadores'], ['financeiro', 'Recursos'],
+        ['metas', 'Indicadores'], ['evidencias', 'Evidências'], ['relatorios', 'Relatórios'],
+    ]],
+    ['contas', 'Gerenciamento de contas', [
+        ['publico', 'Página pública'], ['contas', 'Acessos das OSCs'], ['configuracoes', 'Configurações'],
+    ]],
 ];
 const dashboardItems = [
     ['dinheiro', 'Dinheiro recebido'], ['voluntariado', 'Horas de voluntariado'],
@@ -166,7 +170,7 @@ const configs = {
             { name: 'description', label: 'Observação (até 500 caracteres)', type: 'textarea', required: false, maxLength: 500 },
         ],
         headers: ['Ações', 'Data', 'Projeto', 'Pessoas', 'Observação'],
-        row: (item) => [actions(item), escapeHTML(item.date), escapeHTML(item.project), number(item.quantity), escapeHTML(item.description || '—')],
+        row: (item) => [`${actions(item)} <button type="button" data-action="increment" data-id="${Number(item.id)}">Aumentar</button>`, escapeHTML(item.date), escapeHTML(item.project), number(item.quantity), escapeHTML(item.description || '—')],
     },
     evidences: {
         button: 'Nova evidência', body: '#grid-evidencias', cards: true,
@@ -306,6 +310,10 @@ function bindEntity(entity) {
         const items = JSON.parse(container.dataset.items || '[]');
         const item = items.find((candidate) => Number(candidate.id) === Number(button.dataset.id));
         if (!item) return;
+        if (button.dataset.action === 'increment' && entity === 'people_served') {
+            openPeopleServedIncrement(item).catch((error) => notify(error.message));
+            return;
+        }
         if (button.dataset.action === 'edit') {
             openEditor(entity, item).catch((error) => notify(error.message));
             return;
@@ -318,6 +326,35 @@ function bindEntity(entity) {
             if (entity === 'people_served' && document.getElementById('report-filters')) await loadReport();
         } catch (error) {
             notify(error.message);
+        }
+    });
+}
+
+async function openPeopleServedIncrement(item) {
+    const dialog = document.createElement('dialog');
+    dialog.className = 'app-dialog';
+    dialog.innerHTML = `<h2>Aumentar pessoas atendidas</h2><p>${escapeHTML(item.project)} · ${escapeHTML(item.date)} · ${number(item.quantity)} já registradas</p><form><label>Quantidade a acrescentar<input name="increment" type="number" min="1" step="1" required></label><p class="form-error" role="alert"></p><menu><button type="button" class="btn-secondary" data-cancel>Cancelar</button><button type="submit" class="btn">Acrescentar</button></menu></form>`;
+    document.body.append(dialog);
+    dialog.showModal();
+    dialog.querySelector('[data-cancel]').addEventListener('click', () => dialog.close());
+    dialog.addEventListener('close', () => dialog.remove(), { once: true });
+    dialog.querySelector('form').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const submit = dialog.querySelector('[type="submit"]');
+        submit.disabled = true;
+        try {
+            const increment = Number(new FormData(event.currentTarget).get('increment'));
+            await apiRequest({ action: 'increment-people-served' }, {
+                method: 'POST',
+                body: JSON.stringify({ id: item.id, increment }),
+            });
+            dialog.close();
+            await loadEntity('people_served');
+            await loadReport();
+            notify(`${number(increment)} pessoa(s) acrescentada(s) ao registro.`);
+        } catch (error) {
+            dialog.querySelector('.form-error').textContent = error.message;
+            submit.disabled = false;
         }
     });
 }
@@ -483,22 +520,24 @@ function bindSupportRequests() {
 }
 
 function setRoleNavigation(user) {
-    const permissions = user.role === 'admin'
-        ? ['dashboard', 'projetos', 'apoiadores', 'financeiro', 'metas', 'evidencias', 'relatorios', 'publico', 'contas', 'configuracoes']
-        : user.role === 'osc'
-            ? ['dashboard', 'projetos', 'financeiro', 'metas', 'evidencias', 'relatorios', 'publico', 'configuracoes']
-            : ['apoiador', 'publico', 'configuracoes'];
-    document.querySelectorAll('.sidebar-menu a[data-role-page]').forEach((link) => {
-        const key = link.dataset.rolePage;
-        link.hidden = !permissions.includes(key) || (key !== 'configuracoes' && (currentPreferences.hiddenMenu || []).includes(key));
-    });
-    const menu = document.querySelector('.sidebar-menu');
-    const defaultOrder = navigationItems.map(([key]) => key);
-    const order = [...new Set([...(currentPreferences.menuOrder || []), ...defaultOrder])].filter((key) => permissions.includes(key));
-    for (const key of order) {
-        const link = menu.querySelector(`[data-role-page="${key}"]`);
-        if (link) menu.append(link.closest('li'));
+    const permissions = roleNavigationPermissions(user.role);
+    for (const [group, , items] of navigationGroups) {
+        const container = document.querySelector(`[data-menu-group="${group}"]`);
+        const list = container.querySelector('ul');
+        const savedOrder = (currentPreferences.menuOrder || []).filter((key) => items.some(([itemKey]) => itemKey === key) && permissions.includes(key));
+        const order = [...new Set([...savedOrder, ...items.map(([key]) => key).filter((key) => permissions.includes(key))])];
+        for (const key of order) {
+            const link = list.querySelector(`[data-role-page="${key}"]`);
+            if (link) list.append(link.closest('li'));
+        }
+        for (const [key] of items) {
+            const link = list.querySelector(`[data-role-page="${key}"]`);
+            if (link) link.hidden = !permissions.includes(key);
+        }
+        container.hidden = !order.length;
     }
+    const userName = document.getElementById('current-user-name');
+    if (userName) userName.textContent = user.name || user.email;
     applyThemePreference();
     applyDashboardPreferences();
     const themeToggle = document.getElementById('theme-toggle');
@@ -514,6 +553,12 @@ function setRoleNavigation(user) {
             }
         });
     }
+}
+
+function roleNavigationPermissions(role) {
+    if (role === 'admin') return ['dashboard', 'projetos', 'apoiadores', 'financeiro', 'metas', 'evidencias', 'relatorios', 'publico', 'contas', 'configuracoes'];
+    if (role === 'osc') return ['dashboard', 'projetos', 'financeiro', 'metas', 'evidencias', 'relatorios', 'publico', 'configuracoes'];
+    return ['apoiador', 'publico', 'configuracoes'];
 }
 
 function applyThemePreference() {
@@ -538,20 +583,23 @@ function applyDashboardPreferences() {
     }
 }
 
-function settingsList(items, list, hiddenItems = [], order = [], allowHide = true) {
+function settingsList(items, list, order = [], allowHide = false, hiddenItems = []) {
     const defaultOrder = items.map(([key]) => key);
     const orderedItems = [...new Set([...order, ...defaultOrder])].filter((key) => defaultOrder.includes(key));
     list.replaceChildren(...orderedItems.map((key) => {
         const [, label] = items.find(([itemKey]) => itemKey === key);
         const row = document.createElement('li');
         row.dataset.settingKey = key;
-        const checkbox = document.createElement('input');
-        checkbox.type = 'checkbox';
-        checkbox.checked = !hiddenItems.includes(key);
-        checkbox.disabled = !allowHide || key === 'configuracoes';
-        checkbox.dataset.visibility = '';
-        const text = document.createElement('label');
-        text.append(checkbox, document.createTextNode(` ${label}`));
+        const text = document.createElement(allowHide ? 'label' : 'span');
+        if (allowHide) {
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.checked = !hiddenItems.includes(key);
+            checkbox.dataset.visibility = '';
+            text.append(checkbox, document.createTextNode(` ${label}`));
+        } else {
+            text.textContent = label;
+        }
         const up = document.createElement('button');
         up.type = 'button';
         up.dataset.move = '-1';
@@ -565,44 +613,45 @@ function settingsList(items, list, hiddenItems = [], order = [], allowHide = tru
         row.append(text, up, down);
         return row;
     }));
+    const updateMoveButtons = () => {
+        const rows = [...list.querySelectorAll('[data-setting-key]')];
+        rows.forEach((row, index) => {
+            row.querySelector('[data-move="-1"]').disabled = index === 0;
+            row.querySelector('[data-move="1"]').disabled = index === rows.length - 1;
+        });
+    };
+    updateMoveButtons();
     list.addEventListener('click', (event) => {
         const button = event.target.closest('[data-move]');
         if (!button) return;
         const row = button.closest('li');
         if (button.dataset.move === '-1' && row.previousElementSibling) list.insertBefore(row, row.previousElementSibling);
         if (button.dataset.move === '1' && row.nextElementSibling) list.insertBefore(row.nextElementSibling, row);
+        updateMoveButtons();
     });
 }
 
 function loadSettingsPage() {
-    const allowedPages = currentUser.role === 'admin'
-        ? ['dashboard', 'projetos', 'apoiadores', 'financeiro', 'metas', 'evidencias', 'relatorios', 'publico', 'contas', 'configuracoes']
-        : currentUser.role === 'osc'
-            ? ['dashboard', 'projetos', 'financeiro', 'metas', 'evidencias', 'relatorios', 'publico', 'configuracoes']
-            : ['apoiador', 'publico', 'configuracoes'];
-    const menuItems = navigationItems.filter(([key]) => allowedPages.includes(key));
+    const allowedPages = roleNavigationPermissions(currentUser.role);
     const menuOrder = currentPreferences.menuOrder || [];
-    const menuList = document.getElementById('settings-menu');
-    settingsList(menuItems, menuList, currentPreferences.hiddenMenu || [], menuOrder);
+    navigationGroups.forEach(([group, , items]) => {
+        const available = items.filter(([key]) => allowedPages.includes(key));
+        settingsList(available, document.getElementById(`settings-menu-${group}`), menuOrder.filter((key) => available.some(([itemKey]) => itemKey === key)));
+    });
     if (currentUser.role === 'supporter') document.getElementById('settings-cards-section').hidden = true;
-    else settingsList(dashboardItems, document.getElementById('settings-cards'), currentPreferences.hiddenCards || [], currentPreferences.cardOrder || []);
+    else settingsList(dashboardItems, document.getElementById('settings-cards'), currentPreferences.cardOrder || [], true, currentPreferences.hiddenCards || []);
     const theme = currentPreferences.theme === 'dark' ? 'dark' : 'light';
     document.querySelector(`input[name="theme"][value="${theme}"]`).checked = true;
     const form = document.getElementById('preferences-form');
     const status = document.getElementById('preferences-status');
     form.addEventListener('submit', async (event) => {
         event.preventDefault();
-        const collectOrder = (listId) => [...document.querySelectorAll(`#${listId} [data-setting-key]`)].map((row) => row.dataset.settingKey);
-        const collectHidden = (listId) => [...document.querySelectorAll(`#${listId} [data-setting-key]`)]
-            .filter((row) => !row.querySelector('[data-visibility]').checked)
-            .map((row) => row.dataset.settingKey);
-        const cardList = document.getElementById('settings-cards');
+        const menuOrder = navigationGroups.flatMap(([group]) => [...document.querySelectorAll(`#settings-menu-${group} [data-setting-key]`)].map((row) => row.dataset.settingKey));
         const preferences = {
             theme: new FormData(form).get('theme'),
-            menuOrder: collectOrder('settings-menu'),
-            hiddenMenu: collectHidden('settings-menu'),
+            menuOrder,
             cardOrder: currentUser.role === 'supporter' ? currentPreferences.cardOrder || [] : collectOrder('settings-cards'),
-            hiddenCards: currentUser.role === 'supporter' ? currentPreferences.hiddenCards || [] : collectHidden('settings-cards'),
+            hiddenCards: currentUser.role === 'supporter' ? currentPreferences.hiddenCards || [] : collectHiddenCards(),
         };
         try {
             currentPreferences = await apiRequest({ action: 'preferences' }, { method: 'POST', body: JSON.stringify(preferences) });
@@ -610,6 +659,98 @@ function loadSettingsPage() {
             status.textContent = 'Configurações salvas.';
         } catch (error) {
             status.textContent = error.message;
+        }
+    });
+    bindAccountManagement();
+}
+
+function collectOrder(listId) {
+    return [...document.querySelectorAll(`#${listId} [data-setting-key]`)].map((row) => row.dataset.settingKey);
+}
+
+function collectHiddenCards() {
+    return [...document.querySelectorAll('#settings-cards [data-setting-key]')]
+        .filter((row) => !row.querySelector('[data-visibility]').checked)
+        .map((row) => row.dataset.settingKey);
+}
+
+function bindAccountManagement() {
+    const profileForm = document.getElementById('profile-form');
+    profileForm.elements.name.value = currentUser.name || '';
+    profileForm.elements.email.value = currentUser.email || '';
+    profileForm.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const status = profileForm.querySelector('[role="status"]');
+        const button = profileForm.querySelector('[type="submit"]');
+        button.disabled = true;
+        status.textContent = '';
+        try {
+            const result = await apiRequest({ action: 'account' }, {
+                method: 'POST',
+                body: JSON.stringify({ operation: 'profile', name: profileForm.elements.name.value }),
+            });
+            currentUser.name = result.name;
+            const userName = document.getElementById('current-user-name');
+            if (userName) userName.textContent = result.name;
+            status.textContent = 'Perfil atualizado.';
+        } catch (error) {
+            status.textContent = error.message;
+        } finally {
+            button.disabled = false;
+        }
+    });
+
+    const passwordForm = document.getElementById('password-form');
+    passwordForm.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const alert = passwordForm.querySelector('[role="alert"]');
+        const status = passwordForm.querySelector('[role="status"]');
+        const button = passwordForm.querySelector('[type="submit"]');
+        alert.textContent = '';
+        status.textContent = '';
+        if (passwordForm.elements.new_password.value !== passwordForm.elements.confirm_password.value) {
+            alert.textContent = 'A confirmação da nova senha não corresponde.';
+            return;
+        }
+        button.disabled = true;
+        try {
+            await apiRequest({ action: 'account' }, {
+                method: 'POST',
+                body: JSON.stringify({
+                    operation: 'password',
+                    current_password: passwordForm.elements.current_password.value,
+                    new_password: passwordForm.elements.new_password.value,
+                }),
+            });
+            passwordForm.reset();
+            status.textContent = 'Senha alterada. Sua sessão atual continua ativa.';
+        } catch (error) {
+            alert.textContent = error.message;
+        } finally {
+            button.disabled = false;
+        }
+    });
+
+    const deleteForm = document.getElementById('delete-account-form');
+    deleteForm.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        if (!window.confirm('Excluir sua conta permanentemente? Esta ação não pode ser desfeita.')) return;
+        const alert = deleteForm.querySelector('[role="alert"]');
+        const button = deleteForm.querySelector('[type="submit"]');
+        alert.textContent = '';
+        button.disabled = true;
+        try {
+            await apiRequest({ action: 'account' }, {
+                method: 'POST',
+                body: JSON.stringify({
+                    operation: 'delete',
+                    current_password: deleteForm.elements.current_password.value,
+                }),
+            });
+            window.location.href = 'login.html';
+        } catch (error) {
+            alert.textContent = error.message;
+            button.disabled = false;
         }
     });
 }

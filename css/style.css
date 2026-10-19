@@ -65,10 +65,17 @@ aside {
 }
 
 .sidebar-menu {
-    list-style: none;
-    padding: 15px 10px;
+    padding: 10px 10px 15px;
     overflow-y: auto;
     flex-grow: 1;
+}
+
+.sidebar-menu-group[hidden] {
+    display: none;
+}
+
+.sidebar-menu-group ul {
+    list-style: none;
 }
 
 .sidebar-menu li a {
@@ -92,9 +99,13 @@ aside {
     font-size: 0.7rem;
     text-transform: uppercase;
     color: var(--muted-text);
-    padding: 10px 15px;
-    margin-top: 8px;
+    padding: 12px 15px 7px;
     letter-spacing: 0.5px;
+}
+
+#current-user-name {
+    color: var(--muted-text);
+    font-size: 0.9rem;
 }
 
 .main-container {
@@ -236,6 +247,54 @@ textarea {
 
 .settings-list li label {
     flex: 1;
+}
+
+.settings-list button {
+    padding: 5px 9px;
+    border: 1px solid var(--border-color);
+    border-radius: 5px;
+    color: var(--text-color);
+    background: var(--surface-color);
+    cursor: pointer;
+}
+
+.settings-list button:disabled {
+    cursor: not-allowed;
+    opacity: .45;
+}
+
+.settings-form {
+    display: grid;
+    gap: 12px;
+    max-width: 560px;
+}
+
+.settings-form label {
+    display: grid;
+    gap: 6px;
+    font-weight: 600;
+}
+
+.settings-form input {
+    padding: 10px;
+    border: 1px solid var(--border-color);
+    border-radius: 5px;
+    font: inherit;
+}
+
+.settings-form [role="status"],
+.settings-form [role="alert"] {
+    min-height: 1.2em;
+}
+
+.settings-danger {
+    padding: 16px;
+    border: 1px solid #b02a37;
+    border-radius: 6px;
+}
+
+.settings-danger h2 {
+    color: #b02a37;
 }
 
 .settings-list button {

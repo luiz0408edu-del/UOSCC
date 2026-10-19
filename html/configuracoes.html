@@ -12,9 +12,39 @@
             <div class="page-header">
                 <div>
                     <h1>Configurações</h1>
-                    <p>Personalize a aparência e a organização da sua área.</p>
+                    <p>Gerencie seu perfil, organize a navegação e personalize a aparência.</p>
                 </div>
             </div>
+            <section class="settings-section">
+                <h2>Perfil</h2>
+                <form id="profile-form" class="settings-form">
+                    <label>Nome
+                        <input name="name" type="text" maxlength="200" required>
+                    </label>
+                    <label>E-mail
+                        <input name="email" type="email" readonly>
+                    </label>
+                    <p role="status" aria-live="polite"></p>
+                    <button type="submit" class="btn">Salvar perfil</button>
+                </form>
+            </section>
+            <section class="settings-section">
+                <h2>Alterar senha</h2>
+                <form id="password-form" class="settings-form">
+                    <label>Senha atual
+                        <input name="current_password" type="password" autocomplete="current-password" required>
+                    </label>
+                    <label>Nova senha (mínimo 12 caracteres)
+                        <input name="new_password" type="password" autocomplete="new-password" minlength="12" required>
+                    </label>
+                    <label>Confirmar nova senha
+                        <input name="confirm_password" type="password" autocomplete="new-password" minlength="12" required>
+                    </label>
+                    <p role="alert" aria-live="polite"></p>
+                    <p role="status" aria-live="polite"></p>
+                    <button type="submit" class="btn">Alterar senha</button>
+                </form>
+            </section>
             <form id="preferences-form">
                 <section class="settings-section">
                     <h2>Aparência</h2>
@@ -25,8 +55,20 @@
                     </fieldset>
                 </section>
                 <section class="settings-section">
-                    <h2>Itens do menu</h2>
-                    <ul id="settings-menu" class="settings-list"></ul>
+                    <h2>Organizar menu</h2>
+                    <p>Mova os itens dentro de cada tópico. Nenhum item será ocultado ou mudará de tópico.</p>
+                    <div class="settings-section">
+                        <h3>Menu</h3>
+                        <ul id="settings-menu-menu" class="settings-list"></ul>
+                    </div>
+                    <div class="settings-section">
+                        <h3>Gestão</h3>
+                        <ul id="settings-menu-gestao" class="settings-list"></ul>
+                    </div>
+                    <div class="settings-section">
+                        <h3>Gerenciamento de contas</h3>
+                        <ul id="settings-menu-contas" class="settings-list"></ul>
+                    </div>
                 </section>
                 <section class="settings-section" id="settings-cards-section">
                     <h2>Cartões do painel</h2>
@@ -35,6 +77,17 @@
                 <p id="preferences-status" role="status" aria-live="polite"></p>
                 <button type="submit" class="btn">Salvar configurações</button>
             </form>
+            <section class="settings-section settings-danger">
+                <h2>Excluir minha conta</h2>
+                <p>Esta ação encerra sua conta permanentemente. Será necessário confirmar sua senha.</p>
+                <form id="delete-account-form" class="settings-form">
+                    <label>Senha atual
+                        <input name="current_password" type="password" autocomplete="current-password" required>
+                    </label>
+                    <p role="alert" aria-live="polite"></p>
+                    <button type="submit" class="btn">Excluir minha conta</button>
+                </form>
+            </section>
         </div>
     </div>
     <script src="../js/layout.js"></script>

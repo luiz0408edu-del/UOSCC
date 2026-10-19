@@ -13,11 +13,12 @@ session_start();
 try {
     $pdo = database();
     if (!empty($_SESSION['user_id'])) {
-        $sessionUserQuery = $pdo->prepare('SELECT id, email, role, organization, supporter_id FROM users WHERE id = ?');
+        $sessionUserQuery = $pdo->prepare('SELECT id, email, role, display_name, organization, supporter_id FROM users WHERE id = ?');
         $sessionUserQuery->execute([(int) $_SESSION['user_id']]);
         $sessionUser = $sessionUserQuery->fetch();
         if ($sessionUser) {
             $_SESSION['email'] = $sessionUser['email'];
+            $_SESSION['display_name'] = $sessionUser['display_name'] ?: $sessionUser['email'];
             $_SESSION['role'] = $sessionUser['role'];
             $_SESSION['organization'] = $sessionUser['organization'];
             $_SESSION['supporter_id'] = $sessionUser['supporter_id'];
@@ -43,8 +44,8 @@ try {
         $supporterInsert = $pdo->prepare('INSERT INTO supporters (name, type, public_token) VALUES (?, ?, ?)');
         $supporterInsert->execute([$name, $type, bin2hex(random_bytes(16))]);
         $supporterId = (int) $pdo->lastInsertId();
-        $userInsert = $pdo->prepare('INSERT INTO users (email, password_hash, role, supporter_id) VALUES (?, ?, ?, ?)');
-        $userInsert->execute([$email, password_hash($password, PASSWORD_DEFAULT), 'supporter', $supporterId]);
+        $userInsert = $pdo->prepare('INSERT INTO users (email, password_hash, role, display_name, supporter_id) VALUES (?, ?, ?, ?, ?)');
+        $userInsert->execute([$email, password_hash($password, PASSWORD_DEFAULT), 'supporter', $name, $supporterId]);
         $pdo->commit();
         respond(['created' => true], 201);
     }
@@ -52,7 +53,7 @@ try {
     if ($action === 'login' && $method === 'POST') {
         $input = request_data();
         $email = strtolower(trim((string) ($input['email'] ?? '')));
-        $statement = $pdo->prepare('SELECT id, email, password_hash, role, organization, supporter_id FROM users WHERE email = ?');
+        $statement = $pdo->prepare('SELECT id, email, password_hash, role, display_name, organization, supporter_id FROM users WHERE email = ?');
         $statement->execute([$email]);
         $user = $statement->fetch();
         if (!$user || !password_verify((string) ($input['password'] ?? ''), $user['password_hash'])) {
@@ -61,10 +62,11 @@ try {
         session_regenerate_id(true);
         $_SESSION['user_id'] = (int) $user['id'];
         $_SESSION['email'] = $user['email'];
+        $_SESSION['display_name'] = $user['display_name'] ?: $user['email'];
         $_SESSION['role'] = $user['role'];
         $_SESSION['organization'] = $user['organization'];
         $_SESSION['supporter_id'] = $user['supporter_id'];
-        respond(['user' => ['email' => $user['email'], 'role' => $user['role'], 'organization' => $user['organization']]]);
+        respond(['user' => ['email' => $user['email'], 'name' => $user['display_name'] ?: $user['email'], 'role' => $user['role'], 'organization' => $user['organization']]]);
     }
 
     if ($action === 'logout' && $method === 'POST') {
@@ -107,10 +109,13 @@ try {
     if ($action === 'me') {
         $user = empty($_SESSION['user_id']) ? null : current_user();
         if ($user) {
+            $nameQuery = $pdo->prepare('SELECT display_name FROM users WHERE id = ?');
+            $nameQuery->execute([$user['id']]);
+            $user['name'] = (string) ($nameQuery->fetchColumn() ?: $user['email']);
             if ($user['role'] === 'supporter') {
-                $nameQuery = $pdo->prepare('SELECT name FROM supporters WHERE id = ?');
-                $nameQuery->execute([$user['supporter_id']]);
-                $user['name'] = (string) $nameQuery->fetchColumn();
+                $supporterNameQuery = $pdo->prepare('SELECT name FROM supporters WHERE id = ?');
+                $supporterNameQuery->execute([$user['supporter_id']]);
+                $user['name'] = (string) ($supporterNameQuery->fetchColumn() ?: $user['name']);
             }
             unset($user['id'], $user['supporter_id']);
         }
@@ -163,14 +168,116 @@ try {
         $allowedCards = ['dinheiro', 'voluntariado', 'pessoas', 'metas', 'evidencias'];
         $preferences = [
             'theme' => ($input['theme'] ?? '') === 'dark' ? 'dark' : 'light',
-            'hiddenMenu' => array_values(array_intersect((array) ($input['hiddenMenu'] ?? []), $allowedPages)),
             'hiddenCards' => array_values(array_intersect((array) ($input['hiddenCards'] ?? []), $allowedCards)),
-            'menuOrder' => array_values(array_unique(array_intersect((array) ($input['menuOrder'] ?? []), $allowedPages))),
+            'menuOrder' => [],
             'cardOrder' => array_values(array_unique(array_intersect((array) ($input['cardOrder'] ?? []), $allowedCards))),
         ];
+        $menuGroups = [
+            ['apoiador', 'dashboard'],
+            ['projetos', 'apoiadores', 'financeiro', 'metas', 'evidencias', 'relatorios'],
+            ['publico', 'contas', 'configuracoes'],
+        ];
+        foreach ($menuGroups as $group) {
+            $available = array_values(array_intersect($group, $allowedPages));
+            $requested = array_values(array_unique(array_intersect((array) ($input['menuOrder'] ?? []), $available)));
+            $preferences['menuOrder'] = [...$preferences['menuOrder'], ...$requested, ...array_values(array_diff($available, $requested))];
+        }
         $savePreferences = $pdo->prepare('UPDATE users SET preferences = ? WHERE id = ?');
         $savePreferences->execute([json_encode($preferences, JSON_UNESCAPED_UNICODE), current_user()['id']]);
         respond($preferences);
+    }
+    if ($action === 'account' && $method === 'POST') {
+        $input = request_data();
+        $operation = (string) ($input['operation'] ?? '');
+        $user = current_user();
+        if ($operation === 'profile') {
+            $name = trim((string) ($input['name'] ?? ''));
+            if ($name === '' || strlen($name) > 200) {
+                respond(['error' => 'Informe um nome com até 200 caracteres.'], 422);
+            }
+            $updateName = $pdo->prepare('UPDATE users SET display_name = ? WHERE id = ?');
+            $updateName->execute([$name, $user['id']]);
+            if ($user['role'] === 'supporter') {
+                $updateSupporter = $pdo->prepare('UPDATE supporters SET name = ? WHERE id = ?');
+                $updateSupporter->execute([$name, $user['supporter_id']]);
+            }
+            $_SESSION['display_name'] = $name;
+            respond(['name' => $name]);
+        }
+        if (!in_array($operation, ['password', 'delete'], true)) {
+            respond(['error' => 'Operação de conta inválida.'], 422);
+        }
+        $passwordQuery = $pdo->prepare('SELECT password_hash FROM users WHERE id = ?');
+        $passwordQuery->execute([$user['id']]);
+        if (!password_verify((string) ($input['current_password'] ?? ''), (string) $passwordQuery->fetchColumn())) {
+            respond(['error' => 'A senha atual está incorreta.'], 403);
+        }
+        if ($operation === 'password') {
+            $newPassword = (string) ($input['new_password'] ?? '');
+            if (strlen($newPassword) < 12) {
+                respond(['error' => 'A nova senha deve ter pelo menos 12 caracteres.'], 422);
+            }
+            $updatePassword = $pdo->prepare('UPDATE users SET password_hash = ? WHERE id = ?');
+            $updatePassword->execute([password_hash($newPassword, PASSWORD_DEFAULT), $user['id']]);
+            session_regenerate_id(true);
+            respond(['updated' => true]);
+        }
+
+        $pdo->beginTransaction();
+        $adminLockSql = $pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'mysql'
+            ? 'SELECT id FROM users WHERE role = ? FOR UPDATE'
+            : 'SELECT id FROM users WHERE role = ?';
+        $adminQuery = $pdo->prepare($adminLockSql);
+        $adminQuery->execute(['admin']);
+        $adminIds = $adminQuery->fetchAll(PDO::FETCH_COLUMN);
+        if ($user['role'] === 'admin' && count($adminIds) <= 1) {
+            $pdo->rollBack();
+            respond(['error' => 'Não é possível excluir a última conta de administrador.'], 409);
+        }
+        if ($user['role'] === 'admin') {
+            $otherAdminId = (int) reset($adminIds);
+            if ($otherAdminId === $user['id']) {
+                $otherAdminId = (int) $adminIds[1];
+            }
+            $preserveReports = $pdo->prepare('UPDATE report_notes SET author_id = ? WHERE author_id = ?');
+            $preserveReports->execute([$otherAdminId, $user['id']]);
+        }
+        $deleteUser = $pdo->prepare('DELETE FROM users WHERE id = ?');
+        $deleteUser->execute([$user['id']]);
+        if ($user['role'] === 'supporter' && $user['supporter_id'] !== null) {
+            $deleteSupporter = $pdo->prepare('DELETE FROM supporters WHERE id = ?');
+            $deleteSupporter->execute([$user['supporter_id']]);
+        }
+        $pdo->commit();
+        $_SESSION = [];
+        if (ini_get('session.use_cookies')) {
+            $params = session_get_cookie_params();
+            setcookie(session_name(), '', time() - 42000, $params['path'], $params['domain'], $params['secure'], $params['httponly']);
+        }
+        session_destroy();
+        respond(['deleted' => true]);
+    }
+    if ($action === 'increment-people-served' && $method === 'POST') {
+        require_role(['admin', 'osc']);
+        $user = current_user();
+        $input = request_data();
+        $id = filter_var($input['id'] ?? null, FILTER_VALIDATE_INT);
+        $increment = filter_var($input['increment'] ?? null, FILTER_VALIDATE_INT);
+        if ($id === false || $id < 1 || $increment === false || $increment < 1 || $increment > 4294967295) {
+            respond(['error' => 'Informe um registro válido e uma quantidade inteira maior que zero.'], 422);
+        }
+        $sql = 'UPDATE people_served SET quantity = quantity + ? WHERE id = ? AND quantity <= 4294967295 - ?';
+        $values = [$increment, $id, $increment];
+        if ($user['role'] === 'osc') {
+            $sql .= ' AND project_id IN (SELECT id FROM projects WHERE organization = ?)';
+            $values[] = $user['organization'];
+        }
+        $incrementQuery = $pdo->prepare($sql);
+        $incrementQuery->execute($values);
+        if ($incrementQuery->rowCount() !== 1) {
+            respond(['error' => 'O registro não existe, não pertence à sua OSC ou excederia o limite permitido.'], 404);
+        }
+        respond(['updated' => true]);
     }
 
     if ($action === 'support-request-file' && $method === 'GET') {
@@ -446,7 +553,7 @@ try {
     if ($role === 'supporter') {
         respond(['error' => 'Use a área de acompanhamento do apoiador.'], 403);
     }
-    if ($role === 'osc' && !in_array($entity, ['projects', 'resources', 'indicators', 'evidences'], true)) {
+    if ($role === 'osc' && !in_array($entity, ['projects', 'resources', 'indicators', 'people_served', 'evidences'], true)) {
         respond(['error' => 'Sua conta OSC não tem acesso a este cadastro.'], 403);
     }
 
@@ -537,6 +644,9 @@ try {
         if ($method === 'POST') {
             if ($entity === 'supporters') {
                 $values['public_token'] = bin2hex(random_bytes(16));
+            }
+            if ($entity === 'people_served') {
+                $values['created_by'] = current_user()['id'];
             }
             $columns = array_keys($values);
             $quotedColumns = array_map(static fn (string $column): string => '`' . $column . '`', $columns);

@@ -60,6 +60,7 @@ function current_user(): array
     return [
         'id' => (int) ($_SESSION['user_id'] ?? 0),
         'email' => (string) ($_SESSION['email'] ?? ''),
+        'name' => (string) ($_SESSION['display_name'] ?? $_SESSION['email'] ?? ''),
         'role' => (string) ($_SESSION['role'] ?? ''),
         'organization' => $_SESSION['organization'] ?? null,
         'supporter_id' => isset($_SESSION['supporter_id']) ? (int) $_SESSION['supporter_id'] : null,

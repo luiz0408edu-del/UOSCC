@@ -17,9 +17,11 @@ O instalador cria as tabelas usando `UOSCC/php/schema.sql` e configura ou atuali
 ## Perfis
 
 - `admin`: administrador UOSCC. Cria acessos OSC em **Acessos das OSCs**, cadastra recursos e apoiadores, anexa evidências e gera relatórios.
-- `osc`: acesso vinculado a uma das seis áreas. A conta só consulta e registra projetos, recursos e indicadores da própria área.
+- `osc`: acesso vinculado a uma das seis áreas. A conta só consulta e registra projetos, recursos, indicadores e atendimentos de projetos da própria área.
 - `supporter`: cria a própria conta na tela de login e acompanha as contribuições vinculadas a ela.
 - `visitor`: abre `html/publico.html` sem conta para consultar os dados públicos.
+
+Em **Configurações**, qualquer usuário autenticado pode alterar o nome do perfil e a senha ou excluir a própria conta (a última conta de administrador não pode ser excluída). A organização do menu só permite reordenar itens dentro dos tópicos **Menu**, **Gestão** e **Gerenciamento de contas**; os cartões do painel continuam podendo ser ocultados individualmente. No relatório, **Aumentar** soma pessoas ao registro do projeto e da data selecionados.
 
 As seis áreas são educação e formação cidadã, meio ambiente e sustentabilidade, saúde e bem-estar comunitário, assistência social e apoio às famílias, direitos humanos e inclusão social, e cultura, esporte e lazer.
 

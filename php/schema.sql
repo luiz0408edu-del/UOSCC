@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS users (
     email VARCHAR(254) NOT NULL UNIQUE,
     password_hash VARCHAR(255) NOT NULL,
     role VARCHAR(20) NOT NULL DEFAULT 'admin',
+    display_name VARCHAR(200) NULL,
     organization VARCHAR(200) NULL,
     supporter_id BIGINT UNSIGNED NULL UNIQUE,
     preferences TEXT NULL,

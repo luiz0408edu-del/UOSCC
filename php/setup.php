@@ -31,6 +31,7 @@ if ($pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'mysql') {
         email TEXT NOT NULL UNIQUE,
         password_hash TEXT NOT NULL,
         role TEXT NOT NULL DEFAULT \'admin\',
+        display_name TEXT,
         organization TEXT,
         preferences TEXT NOT NULL DEFAULT \'{}\',
         supporter_id INTEGER UNIQUE REFERENCES supporters(id) ON DELETE CASCADE,
@@ -125,6 +126,9 @@ if ($pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'mysql') {
     if (!in_array('organization', $userColumns, true)) {
         $pdo->exec('ALTER TABLE users ADD COLUMN organization TEXT');
     }
+    if (!in_array('display_name', $userColumns, true)) {
+        $pdo->exec('ALTER TABLE users ADD COLUMN display_name TEXT');
+    }
     if (!in_array('supporter_id', $userColumns, true)) {
         $pdo->exec('ALTER TABLE users ADD COLUMN supporter_id INTEGER');
         $pdo->exec('CREATE UNIQUE INDEX IF NOT EXISTS users_supporter_id ON users(supporter_id)');
@@ -154,7 +158,7 @@ if ($pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'mysql') {
 
 if ($pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'mysql') {
     $columns = [
-        'users' => ['role' => "VARCHAR(20) NOT NULL DEFAULT 'admin'", 'organization' => 'VARCHAR(200) NULL', 'supporter_id' => 'BIGINT UNSIGNED NULL UNIQUE', 'preferences' => 'TEXT NULL'],
+        'users' => ['role' => "VARCHAR(20) NOT NULL DEFAULT 'admin'", 'display_name' => 'VARCHAR(200) NULL', 'organization' => 'VARCHAR(200) NULL', 'supporter_id' => 'BIGINT UNSIGNED NULL UNIQUE', 'preferences' => 'TEXT NULL'],
         'supporters' => ['public_token' => 'CHAR(32) NULL'],
         'evidences' => ['date' => 'DATE NULL'],
         'indicators' => ['date' => 'DATE NULL', 'people_when_met' => 'INT UNSIGNED NOT NULL DEFAULT 0'],
@@ -169,6 +173,7 @@ if ($pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'mysql') {
         }
         }
     }
+    $pdo->exec("UPDATE users SET display_name = COALESCE(NULLIF(display_name, ''), SUBSTRING_INDEX(email, '@', 1))");
     $pdo->exec("UPDATE users SET preferences = '{}' WHERE preferences IS NULL");
     $indicatorIndex = $pdo->query("SELECT COUNT(*) FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'resources' AND INDEX_NAME = 'idx_resources_indicator'");
     if ((int) $indicatorIndex->fetchColumn() === 0) {
