@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Minha conta - UOSCC</title>
+    <link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+    <div class="main-container">
+        <div class="content">
+            <div class="page-header">
+                <div>
+                    <h1>Minha conta</h1>
+                    <p>Atualize seu perfil e acompanhe suas contribuições e classificações.</p>
+                </div>
+            </div>
+            <section class="settings-section account-profile">
+                <div>
+                    <img id="account-avatar" class="account-avatar" src="../css/avatar-placeholder.svg" alt="Foto do perfil">
+                    <form id="account-avatar-form" class="settings-form">
+                        <label>Foto de perfil (JPEG, PNG ou WebP; até 5 MB)
+                            <input name="avatar" type="file" accept="image/jpeg,image/png,image/webp" required>
+                        </label>
+                        <button type="submit" class="btn">Atualizar foto</button>
+                    </form>
+                </div>
+                <form id="account-profile-form" class="settings-form" style="margin-top:3vw">
+                    <label>Nome
+                        <input name="name" type="text" maxlength="200" required>
+                    </label>
+                    <label>E-mail
+                        <input name="email" type="email" readonly>
+                    </label>
+                    <p role="status" aria-live="polite"></p>
+                    <button type="submit" class="btn">Salvar perfil</button>
+                </form>
+            </section>
+            <p id="account-role-note" class="account-note"></p>
+            <section class="card-grid">
+                <div class="card"><h2>Dinheiro doado</h2><div id="account-money" class="value">R$ 0,00</div></div>
+                <div class="card"><h2>Horas voluntárias</h2><div id="account-volunteer" class="value">0 h</div></div>
+            </section>
+            <section id="account-materials" class="report-output"></section>
+            <section class="settings-section">
+                <h2>Classificação nos rankings</h2>
+                <p id="account-money-rank"></p>
+                <p id="account-volunteer-rank"></p>
+                <p>Os rankings consideram somente dinheiro e horas de voluntariado. Materiais não são classificados.</p>
+            </section>
+        </div>
+    </div>
+    <script src="../js/layout.js"></script>
+    <script src="../js/app.js"></script>
+</body>
+</html>

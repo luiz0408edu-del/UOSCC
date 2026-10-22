@@ -12,20 +12,16 @@
             <div class="page-header">
                 <div>
                     <h1>Configurações</h1>
-                    <p>Gerencie seu perfil, organize a navegação e personalize a aparência.</p>
+                    <p>Organize a navegação, personalize a aparência e proteja sua conta.</p>
                 </div>
             </div>
-            <section class="settings-section">
-                <h2>Perfil</h2>
-                <form id="profile-form" class="settings-form">
-                    <label>Nome
-                        <input name="name" type="text" maxlength="200" required>
-                    </label>
-                    <label>E-mail
-                        <input name="email" type="email" readonly>
-                    </label>
+            <section class="settings-section" id="public-identity-section" hidden>
+                <h2>Transparência pública</h2>
+                <form id="public-identity-form" class="settings-form">
+                    <label><input name="public_name_allowed" type="checkbox"> Autorizar que meu nome apareça junto às minhas contribuições públicas</label>
+                    <p>Se não autorizar, suas contribuições aparecerão como “Apoiador anônimo”.</p>
                     <p role="status" aria-live="polite"></p>
-                    <button type="submit" class="btn">Salvar perfil</button>
+                    <button type="submit" class="btn">Salvar autorização</button>
                 </form>
             </section>
             <section class="settings-section">

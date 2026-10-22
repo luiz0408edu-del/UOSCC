@@ -13,7 +13,7 @@
             <div class="page-header">
                 <div>
                     <h1>Página pública de transparência</h1>
-                    <p>Consulte a destinação das contribuições pelo código fornecido pelo apoiador.</p>
+                    <p>Consulte projetos, contribuições e materiais recebidos por OSC e período.</p>
                 </div>
                 <a class="btn" id="link-conta" href="login.html">Entrar</a>
             </div>
@@ -24,6 +24,14 @@
                 <small id="ajuda-codigo">Use o código ou link fornecido pelo apoiador.</small>
             </form>
             <div id="resultado-apoiador" aria-live="polite"></div>
+            <form id="public-filters" class="report-filters">
+                <label>OSC
+                    <select name="organization"><option value="">Todas as OSCs</option></select>
+                </label>
+                <label>De<input type="date" name="from"></label>
+                <label>Até<input type="date" name="to"></label>
+                <button type="submit" class="btn">Aplicar filtros</button>
+            </form>
             <div id="conteudo-publico" class="report-output">
             </div>
         </div>

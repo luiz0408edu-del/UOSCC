@@ -33,6 +33,7 @@ document.addEventListener("DOMContentLoaded", () => {
                         <ul>
                             <li><a href="publico.html" id="menu-publico" data-role-page="publico">Página pública</a></li>
                             <li><a href="contas.html" id="menu-contas" data-role-page="contas">Acessos das OSCs</a></li>
+                            <li><a href="conta.html" id="menu-conta" data-role-page="conta">Minha conta</a></li>
                             <li><a href="configuracoes.html" id="menu-configuracoes" data-role-page="configuracoes">Configurações</a></li>
                         </ul>
                     </section>

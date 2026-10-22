@@ -26,7 +26,7 @@ const navigationGroups = [
         ['metas', 'Indicadores'], ['evidencias', 'Evidências'], ['relatorios', 'Relatórios'],
     ]],
     ['contas', 'Gerenciamento de contas', [
-        ['publico', 'Página pública'], ['contas', 'Acessos das OSCs'], ['configuracoes', 'Configurações'],
+        ['publico', 'Página pública'], ['contas', 'Acessos das OSCs'], ['conta', 'Minha conta'], ['configuracoes', 'Configurações'],
     ]],
 ];
 const dashboardItems = [
@@ -121,9 +121,10 @@ const configs = {
         fields: [
             { name: 'name', label: 'Nome do projeto', required: true },
             { name: 'organization', label: 'Área da OSC responsável', type: 'select', options: OSC_AREAS, required: true },
+            { name: 'accepted_resources', label: 'Tipos de recurso aceitos', type: 'checkboxes', options: ['Dinheiro', 'Material', 'Voluntariado'], required: true },
         ],
-        headers: ['Ações', 'Projeto', 'OSC', 'Indicadores', 'Recebido'],
-        row: (item) => [actions(item), escapeHTML(item.name), escapeHTML(item.organization), number(item.indicators), money(item.received)],
+        headers: ['Ações', 'Projeto', 'OSC', 'Recursos aceitos', 'Indicadores', 'Recebido'],
+        row: (item) => [actions(item), escapeHTML(item.name), escapeHTML(item.organization), escapeHTML((item.accepted_resources || []).join(', ')), number(item.indicators), money(item.received)],
     },
     supporters: {
         button: 'Novo apoiador', body: '#tabela-apoiadores',
@@ -141,12 +142,14 @@ const configs = {
             { name: 'project_id', label: 'Projeto', type: 'projects', required: true },
             { name: 'type', label: 'Tipo de recurso', type: 'select', options: ['Dinheiro', 'Material', 'Voluntariado'], required: true },
             { name: 'quantity', label: 'Quantidade (R$ para dinheiro, horas ou unidades)', type: 'number', min: 0, step: 'any', required: true },
+            { name: 'material_name', label: 'Material', required: false },
+            { name: 'unit', label: 'Unidade', type: 'select', options: ['kg', 'g', 'litro', 'ml', 'unidade', 'peça', 'caixa', 'pacote'], required: false },
             { name: 'supporter_id', label: 'Apoiador', type: 'supporters', required: false },
             { name: 'indicator_id', label: 'Vincular ao indicador (opcional)', type: 'indicators', required: false },
             { name: 'usage', label: 'Como foi usado', type: 'textarea', required: false },
         ],
         headers: ['Ações', 'Data', 'Projeto', 'Tipo', 'Quantidade', 'Apoiador', 'Indicador', 'Como foi usado'],
-        row: (item) => [actions(item), escapeHTML(item.date), escapeHTML(item.project || '—'), escapeHTML(item.type), item.type === 'Dinheiro' ? money(item.quantity) : number(item.quantity), escapeHTML(item.supporter || '—'), escapeHTML(item.indicator || '—'), escapeHTML(item.usage || '—')],
+        row: (item) => [actions(item), escapeHTML(item.date), escapeHTML(item.project || '—'), escapeHTML(item.type), item.type === 'Dinheiro' ? money(item.quantity) : item.type === 'Material' ? `${number(item.quantity)} ${escapeHTML(item.unit || 'Unidade não informada')} · ${escapeHTML(item.material_name || 'Material sem descrição')}` : `${number(item.quantity)} h`, escapeHTML(item.supporter || '—'), escapeHTML(item.indicator || '—'), escapeHTML(item.usage || '—')],
     },
     indicators: {
         button: 'Novo indicador', body: '#tabela-indicadores',
@@ -178,7 +181,7 @@ const configs = {
             { name: 'project_id', label: 'Projeto', type: 'projects', required: true },
             { name: 'title', label: 'Título', required: true },
             { name: 'type', label: 'Tipo', type: 'select', options: ['Foto', 'Vídeo', 'Áudio', 'Texto', 'Documento', 'Outro'], required: true },
-            { name: 'file', label: 'Arquivo (imagem, vídeo, áudio, texto ou PDF; até 25 MB)', type: 'file', required: true },
+            { name: 'file', label: 'Arquivo (imagem, vídeo, áudio, texto ou PDF; até 100 MB)', type: 'file', required: true },
             { name: 'date', label: 'Data da evidência', type: 'date', required: true },
             { name: 'description', label: 'Descrição', type: 'textarea', required: false },
         ],
@@ -196,6 +199,10 @@ async function relatedOptions(type, projectId = null) {
 
 async function renderField(field, value, isEditing = false, projectId = null) {
     const required = field.required && !(field.type === 'file' && isEditing) ? 'required' : '';
+    if (field.type === 'checkboxes') {
+        const selected = Array.isArray(value) ? value : field.options;
+        return `<fieldset><legend>${escapeHTML(field.label)}</legend>${field.options.map((option) => `<label><input type="checkbox" name="${field.name}" value="${escapeHTML(option)}" ${selected.includes(option) ? 'checked' : ''}> ${escapeHTML(option)}</label>`).join('')}</fieldset>`;
+    }
     if (field.type === 'select' || field.type === 'projects' || field.type === 'supporters') {
         const options = field.options
             ? field.options.map((option) => `<option value="${escapeHTML(option)}" ${value === option ? 'selected' : ''}>${escapeHTML(option)}</option>`).join('')
@@ -222,7 +229,7 @@ async function renderField(field, value, isEditing = false, projectId = null) {
 
 async function openEditor(entity, existing = null) {
     const config = configs[entity];
-    const fields = config.fields.filter((field) => !(currentUser?.role === 'osc' && (field.type === 'supporters' || (entity === 'projects' && field.name === 'organization'))));
+    const fields = config.fields.filter((field) => !(currentUser?.role === 'osc' && (field.type === 'supporters' || (entity === 'projects' && ['organization', 'accepted_resources'].includes(field.name)))));
     const dialog = document.createElement('dialog');
     dialog.className = 'app-dialog';
     dialog.innerHTML = `<h2>${existing ? 'Editar' : 'Novo registro'}</h2><form>${(await Promise.all(fields.map((field) => renderField(field, existing?.[field.source || field.name], Boolean(existing), existing?.project_id)))).join('')}<p class="form-error" role="alert"></p><menu><button type="button" class="btn-secondary" data-cancel>Cancelar</button><button type="submit" class="btn">Salvar</button></menu></form>`;
@@ -232,6 +239,21 @@ async function openEditor(entity, existing = null) {
     dialog.addEventListener('close', () => dialog.remove(), { once: true });
     const projectSelect = dialog.querySelector('select[name="project_id"]');
     const indicatorSelect = dialog.querySelector('select[name="indicator_id"]');
+    const typeSelect = dialog.querySelector('select[name="type"]');
+    const materialNameField = dialog.querySelector('[name="material_name"]')?.closest('label');
+    const unitField = dialog.querySelector('[name="unit"]')?.closest('label');
+    const updateMaterialFields = () => {
+        if (materialNameField) materialNameField.hidden = typeSelect?.value !== 'Material';
+        if (unitField) unitField.hidden = typeSelect?.value !== 'Material';
+        const quantityLabel = dialog.querySelector('[name="quantity"]')?.closest('label');
+        if (quantityLabel && typeSelect) {
+            quantityLabel.firstChild.textContent = typeSelect.value === 'Dinheiro'
+                ? 'Quantidade (R$)'
+                : typeSelect.value === 'Voluntariado' ? 'Quantidade (horas)' : 'Quantidade';
+        }
+    };
+    typeSelect?.addEventListener('change', updateMaterialFields);
+    updateMaterialFields();
     if (projectSelect && indicatorSelect) {
         projectSelect.addEventListener('change', async () => {
             const indicators = await relatedOptions('indicators', projectSelect.value);
@@ -243,7 +265,9 @@ async function openEditor(entity, existing = null) {
         const submit = dialog.querySelector('[type="submit"]');
         submit.disabled = true;
         try {
-            const values = Object.fromEntries(new FormData(event.currentTarget));
+            const formData = new FormData(event.currentTarget);
+            const values = Object.fromEntries(formData);
+            if (entity === 'projects') values.accepted_resources = formData.getAll('accepted_resources');
             if (currentUser?.role === 'osc' && entity === 'projects') values.organization = currentUser.organization;
             if (entity === 'evidences') {
                 const file = dialog.querySelector('input[name="file"]').files[0];
@@ -360,13 +384,34 @@ async function openPeopleServedIncrement(item) {
 }
 
 async function loadDashboard() {
-    const data = await apiRequest({ action: 'dashboard' });
+    const form = document.getElementById('dashboard-filters');
+    if (form && !form.dataset.bound) {
+        form.dataset.bound = 'true';
+        const organizationSelect = form.elements.organization;
+        if (currentUser.role === 'admin') {
+            const organizations = await apiRequest({ action: 'organizations' });
+            organizationSelect.innerHTML = '<option value="">Todas as OSCs</option>' + organizations.map((organization) => `<option value="${escapeHTML(organization)}">${escapeHTML(organization)}</option>`).join('');
+        } else {
+            document.getElementById('dashboard-organization-filter').hidden = true;
+        }
+        form.addEventListener('submit', (event) => {
+            event.preventDefault();
+            loadDashboard().catch((error) => notify(error.message));
+        });
+    }
+    const filters = form ? Object.fromEntries([...new FormData(form)].filter(([, value]) => value)) : {};
+    const data = await apiRequest({ action: 'dashboard', ...filters });
     applyDashboardPreferences();
     document.getElementById('card-dinheiro').textContent = money(data.money);
     document.getElementById('card-voluntariado').textContent = `${number(data.volunteer)} h`;
     document.getElementById('card-pessoas').textContent = number(data.people);
     document.getElementById('card-metas').textContent = `${data.completedGoals} / ${data.totalGoals}`;
     document.getElementById('card-evidencias').textContent = number(data.evidences);
+    document.getElementById('dashboard-materials').innerHTML = reportTable(
+        'Materiais recebidos por projeto',
+        ['Projeto', 'OSC', 'Material', 'Quantidade'],
+        (data.materials || []).map((item) => [item.project, item.organization, item.material_name, `${number(item.quantity)} ${item.unit}`]),
+    );
 }
 
 function reportTable(title, headings, rows) {
@@ -401,7 +446,7 @@ async function loadReport() {
     container.innerHTML = `<div class="card-grid"><div class="card"><h3>Dinheiro recebido</h3><div class="value">${money(summary.money)}</div></div><div class="card"><h3>Horas de voluntariado</h3><div class="value">${number(summary.volunteer)} h</div></div><div class="card"><h3>Pessoas atendidas</h3><div class="value">${number(summary.people)}</div></div><div class="card"><h3>Metas concluídas</h3><div class="value">${summary.completedGoals} / ${summary.totalGoals}</div></div></div>`
         + reportNoteHTML
         + reportTable('Projetos', ['Projeto', 'OSC', 'Indicadores', 'Recebido'], report.projects.map((item) => [item.name, item.organization, number(item.indicators), money(item.received)]))
-        + reportTable('Recursos', ['Data', 'Projeto', 'Tipo', 'Quantidade', 'Apoiador', 'Uso'], report.resources.map((item) => [item.date, item.project || '—', item.type, item.type === 'Dinheiro' ? money(item.quantity) : number(item.quantity), item.supporter || '—', item.usage || '—']))
+        + reportTable('Recursos', ['Data', 'Projeto', 'Tipo', 'Quantidade', 'Apoiador', 'Uso'], report.resources.map((item) => [item.date, item.project || '—', item.type, item.type === 'Dinheiro' ? money(item.quantity) : item.type === 'Material' ? `${number(item.quantity)} ${item.unit || 'Unidade não informada'} · ${item.material_name || 'Material sem descrição'}` : `${number(item.quantity)} h`, item.supporter || '—', item.usage || '—']))
         + reportTable('Indicadores', ['Data', 'Projeto', 'Indicador', 'Meta', 'Alcançado'], report.indicators.map((item) => [item.date, item.project || '—', item.name, number(item.target), number(item.achieved)]))
         + reportTable('Pessoas atendidas', ['Data', 'Projeto', 'Quantidade', 'Observação'], report.peopleServed.map((item) => [item.date, item.project, number(item.quantity), item.description || '—']))
         + reportTable('Evidências', ['Data', 'Projeto', 'Título', 'Tipo'], report.evidences.map((item) => [item.date, item.project || '—', item.title, item.type]));
@@ -421,15 +466,35 @@ async function loadPublicPage() {
     const result = document.getElementById('resultado-apoiador');
     const query = new URLSearchParams(window.location.search).get('token') || '';
     tokenField.value = query;
-    const data = await apiRequest({ entity: 'public' });
     const container = document.getElementById('conteudo-publico');
-    container.innerHTML = `<div class="card-grid"><div class="card"><h3>Dinheiro recebido</h3><div class="value">${money(data.summary.money)}</div></div><div class="card"><h3>Horas de voluntariado</h3><div class="value">${number(data.summary.volunteer)} h</div></div><div class="card"><h3>Pessoas atendidas</h3><div class="value">${number(data.summary.people)}</div></div><div class="card"><h3>Evidências publicadas</h3><div class="value">${number(data.summary.evidences)}</div></div></div>`
-        + reportTable('Projetos apoiados', ['Projeto', 'OSC', 'Indicadores', 'Recebido'], data.projects.map((item) => [item.name, item.organization, number(item.indicators), money(item.received)]))
-        + reportTable('Destinação dos recursos', ['Data', 'Projeto', 'Tipo', 'Quantidade', 'Uso'], data.resources.map((item) => [item.date, item.project || '—', item.type, item.type === 'Dinheiro' ? money(item.quantity) : number(item.quantity), item.usage || '—']))
-        + `<section class="report-section"><h2>Evidências publicadas</h2>${data.evidences.length ? data.evidences.map((item) => {
-            const safeUrl = /^(https?:\/\/|\.\.\/uploads\/evidence\/)/i.test(item.url) ? item.url : '#';
-            return `<article class="evidence-item"><h3>${escapeHTML(item.title)}</h3><span>${escapeHTML(item.date)} · ${escapeHTML(item.project)} · ${escapeHTML(item.type)}</span><p>${escapeHTML(item.description || '')}</p><a href="${escapeHTML(safeUrl)}" target="_blank" rel="noopener">Abrir evidência</a></article>`;
-        }).join('') : '<p class="empty-state">Nenhuma evidência publicada.</p>'}</section>`;
+    const filtersForm = document.getElementById('public-filters');
+    const filterOrganizations = filtersForm.elements.organization;
+    const initialFilters = new URLSearchParams(window.location.search);
+    const renderPublicData = async () => {
+        const filters = Object.fromEntries([...new FormData(filtersForm)].filter(([, value]) => value));
+        if (!filters.organization && initialFilters.get('organization')) filters.organization = initialFilters.get('organization');
+        const data = await apiRequest({ entity: 'public', ...filters });
+        const selectedOrganization = filters.organization || '';
+        filterOrganizations.innerHTML = '<option value="">Todas as OSCs</option>' + data.organizations.map((organization) => `<option value="${escapeHTML(organization)}">${escapeHTML(organization)}</option>`).join('');
+        filterOrganizations.value = selectedOrganization;
+        container.innerHTML = `<div class="card-grid"><div class="card"><h3>Dinheiro recebido</h3><div class="value">${money(data.summary.money)}</div></div><div class="card"><h3>Horas de voluntariado</h3><div class="value">${number(data.summary.volunteer)} h</div></div><div class="card"><h3>Pessoas atendidas</h3><div class="value">${number(data.summary.people)}</div></div><div class="card"><h3>Evidências publicadas</h3><div class="value">${number(data.summary.evidences)}</div></div></div>`
+            + reportTable('Projetos apoiados', ['Projeto', 'OSC', 'Indicadores', 'Recebido'], data.projects.map((item) => [item.name, item.organization, number(item.indicators), money(item.received)]))
+            + reportTable('Materiais recebidos', ['Projeto', 'OSC', 'Material', 'Quantidade'], (data.summary.materials || []).map((item) => [item.project, item.organization, item.material_name, `${number(item.quantity)} ${item.unit}`]))
+            + reportTable('Destinação dos recursos', ['Data', 'Projeto', 'OSC', 'Tipo', 'Quantidade', 'Apoiador', 'Uso'], data.resources.map((item) => [item.date, item.project || '—', item.organization, item.type, item.type === 'Dinheiro' ? money(item.quantity) : item.type === 'Material' ? `${number(item.quantity)} ${item.unit || 'Unidade não informada'} · ${item.material_name || 'Material sem descrição'}` : `${number(item.quantity)} h`, item.supporter, item.usage || '—']))
+            + `<section class="report-section"><h2>Evidências publicadas</h2>${data.evidences.length ? data.evidences.map((item) => {
+                const safeUrl = /^(https?:\/\/|\.\.\/uploads\/evidence\/)/i.test(item.url) ? item.url : '#';
+                return `<article class="evidence-item"><h3>${escapeHTML(item.title)}</h3><span>${escapeHTML(item.date)} · ${escapeHTML(item.project)} · ${escapeHTML(item.type)}</span><p>${escapeHTML(item.description || '')}</p><a href="${escapeHTML(safeUrl)}" target="_blank" rel="noopener">Abrir evidência</a></article>`;
+            }).join('') : '<p class="empty-state">Nenhuma evidência publicada.</p>'}</section>`
+            + `<section class="report-section"><h2>Maiores apoiadores · ranking geral</h2><p>Classificação acumulada de todas as contribuições. Os materiais são apresentados na transparência, mas não entram nos rankings.</p><div class="leaderboard-grid">${reportTable('Maiores doadores de dinheiro', ['Posição', 'Apoiador', 'Total'], data.rankings.money.top.map((item) => [item.position, item.supporter, money(item.total)]))}${reportTable('Maiores apoiadores voluntários', ['Posição', 'Apoiador', 'Horas'], data.rankings.volunteer.top.map((item) => [item.position, item.supporter, `${number(item.total)} h`]))}</div></section>`;
+    };
+    filtersForm.elements.organization.value = initialFilters.get('organization') || '';
+    filtersForm.elements.from.value = initialFilters.get('from') || '';
+    filtersForm.elements.to.value = initialFilters.get('to') || '';
+    filtersForm.addEventListener('submit', (event) => {
+        event.preventDefault();
+        renderPublicData().catch((error) => notify(error.message));
+    });
+    await renderPublicData();
 
     async function lookupSupporter(token) {
         result.replaceChildren();
@@ -459,12 +524,37 @@ async function loadSupporterPage() {
     const form = document.getElementById('support-request-form');
     form.elements.name.value = data.name;
     form.elements.project_id.innerHTML = '<option value="">Selecione um projeto</option>' + data.projects.map((project) => `<option value="${project.id}">${escapeHTML(project.name)} · ${escapeHTML(project.organization)}</option>`).join('');
+    const typeSelect = form.elements.type;
+    const materialNameField = form.elements.material_name.closest('label');
+    const unitField = form.elements.unit.closest('label');
+    const quantityLabel = form.elements.quantity.closest('label');
+    const updateResourceFields = () => {
+        const project = data.projects.find((item) => Number(item.id) === Number(form.elements.project_id.value));
+        const acceptedResources = project?.accepted_resources || [];
+        const selectedType = typeSelect.value;
+        typeSelect.innerHTML = '<option value="">Selecione</option>' + acceptedResources.map((type) => `<option value="${escapeHTML(type)}">${type === 'Voluntariado' ? 'Tempo voluntário' : escapeHTML(type)}</option>`).join('');
+        if (acceptedResources.includes(selectedType)) typeSelect.value = selectedType;
+        materialNameField.hidden = typeSelect.value !== 'Material';
+        unitField.hidden = typeSelect.value !== 'Material';
+        form.elements.material_name.hidden = typeSelect.value !== 'Material';
+        form.elements.unit.hidden = typeSelect.value !== 'Material';
+        quantityLabel.firstChild.textContent = typeSelect.value === 'Dinheiro'
+            ? 'Valor do apoio (R$)'
+            : typeSelect.value === 'Voluntariado' ? 'Horas de trabalho voluntário' : 'Quantidade';
+        form.elements.material_name.required = typeSelect.value === 'Material';
+        form.elements.unit.required = typeSelect.value === 'Material';
+    };
     const updateIndicators = () => {
         const indicators = data.indicators.filter((item) => Number(item.project_id) === Number(form.elements.project_id.value));
         form.elements.indicator_id.innerHTML = '<option value="">Sem vínculo</option>' + indicators.map((item) => `<option value="${item.id}">${escapeHTML(item.name)}</option>`).join('');
     };
-    form.elements.project_id.addEventListener('change', updateIndicators);
+    form.elements.project_id.addEventListener('change', () => {
+        updateIndicators();
+        updateResourceFields();
+    });
+    typeSelect.addEventListener('change', updateResourceFields);
     updateIndicators();
+    updateResourceFields();
     form.addEventListener('submit', async (event) => {
         event.preventDefault();
         const button = form.querySelector('[type="submit"]');
@@ -475,6 +565,7 @@ async function loadSupporterPage() {
             form.reset();
             form.elements.name.value = data.name;
             updateIndicators();
+            updateResourceFields();
             notify('Pedido enviado para análise da UOSCC ou da OSC.');
             await loadSupporterPageData(await apiRequest({ action: 'supporter-dashboard' }));
         } catch (error) {
@@ -488,16 +579,16 @@ async function loadSupporterPage() {
 
 async function loadSupporterPageData(data) {
     const resources = document.getElementById('supporter-resources');
-    resources.innerHTML = `<p>${number(data.total)} contribuições aprovadas</p>${reportTable('Minhas contribuições e voluntariado', ['Data', 'Projeto', 'Tipo', 'Quantidade', 'Destinação'], data.resources.map((item) => [item.date, item.project || 'Aguardando vínculo', item.type, item.type === 'Dinheiro' ? money(item.quantity) : number(item.quantity), item.usage || 'Sem descrição']))}`;
+    resources.innerHTML = `<p>${number(data.total)} contribuições aprovadas</p>${reportTable('Minhas contribuições e voluntariado', ['Data', 'Projeto', 'Tipo', 'Quantidade', 'Destinação'], data.resources.map((item) => [item.date, item.project || 'Aguardando vínculo', item.type, item.type === 'Dinheiro' ? money(item.quantity) : item.type === 'Material' ? `${number(item.quantity)} ${item.unit || ''} · ${item.material_name || ''}` : `${number(item.quantity)} h`, item.usage || 'Sem descrição']))}`;
     const requests = document.getElementById('supporter-requests');
     const statusLabels = { pending: 'Aguardando análise', approved: 'Aprovado', rejected: 'Não aprovado' };
-    requests.innerHTML = data.requests.length ? `<table><thead><tr><th>Enviado em</th><th>Projeto</th><th>Tipo</th><th>Quantidade</th><th>Status</th><th>Comprovante</th></tr></thead><tbody>${data.requests.map((item) => `<tr><td>${escapeHTML(item.created_at)}</td><td>${escapeHTML(item.project)}</td><td>${escapeHTML(item.type)}</td><td>${item.type === 'Dinheiro' ? money(item.quantity) : number(item.quantity)}</td><td>${statusLabels[item.status] || escapeHTML(item.status)}</td><td><a href="${escapeHTML(item.evidence_url)}" target="_blank" rel="noopener">Abrir</a></td></tr>`).join('')}</tbody></table>` : '<p class="empty-state">Nenhum pedido enviado.</p>';
+    requests.innerHTML = data.requests.length ? `<table><thead><tr><th>Enviado em</th><th>Projeto</th><th>Tipo</th><th>Quantidade</th><th>Detalhes</th><th>Status</th><th>Comprovante</th></tr></thead><tbody>${data.requests.map((item) => `<tr><td>${escapeHTML(item.created_at)}</td><td>${escapeHTML(item.project)}</td><td>${escapeHTML(item.type)}</td><td>${item.type === 'Dinheiro' ? money(item.quantity) : item.type === 'Material' ? `${number(item.quantity)} ${escapeHTML(item.unit || '')}` : `${number(item.quantity)} h`}</td><td>${item.type === 'Material' ? escapeHTML(item.material_name || '') + ' · ' : ''}${escapeHTML(item.description || '')}</td><td>${statusLabels[item.status] || escapeHTML(item.status)}</td><td><a href="${escapeHTML(item.evidence_url)}" target="_blank" rel="noopener">Abrir</a></td></tr>`).join('')}</tbody></table>` : '<p class="empty-state">Nenhum pedido enviado.</p>';
 }
 
 async function loadSupportRequests() {
     const container = document.getElementById('support-requests');
     const requests = await apiRequest({ action: 'support-requests' });
-    container.innerHTML = requests.length ? `<table><thead><tr><th>Apoiador</th><th>Projeto / OSC</th><th>Tipo</th><th>Quantidade</th><th>Descrição</th><th>Comprovante</th><th>Análise</th></tr></thead><tbody>${requests.map((item) => `<tr><td>${escapeHTML(item.supporter)}</td><td>${escapeHTML(item.project)}<br><small>${escapeHTML(item.organization)}</small></td><td>${escapeHTML(item.type)}</td><td>${item.type === 'Dinheiro' ? money(item.quantity) : number(item.quantity)}</td><td>${escapeHTML(item.description || '—')}${item.indicator ? `<br><small>Indicador: ${escapeHTML(item.indicator)}</small>` : ''}</td><td><a href="${escapeHTML(item.evidence_url)}" target="_blank" rel="noopener">Abrir</a></td><td><button type="button" data-request-id="${Number(item.id)}" data-decision="approve">Aprovar</button> <button type="button" data-request-id="${Number(item.id)}" data-decision="reject">Rejeitar</button></td></tr>`).join('')}</tbody></table>` : '<p class="empty-state">Nenhum pedido pendente.</p>';
+    container.innerHTML = requests.length ? `<table><thead><tr><th>Apoiador</th><th>Projeto / OSC</th><th>Tipo</th><th>Quantidade</th><th>Descrição</th><th>Comprovante</th><th>Análise</th></tr></thead><tbody>${requests.map((item) => `<tr><td>${escapeHTML(item.supporter)}</td><td>${escapeHTML(item.project)}<br><small>${escapeHTML(item.organization)}</small></td><td>${escapeHTML(item.type)}</td><td>${item.type === 'Dinheiro' ? money(item.quantity) : item.type === 'Material' ? `${number(item.quantity)} ${escapeHTML(item.unit || '')}` : `${number(item.quantity)} h`}</td><td>${item.type === 'Material' ? escapeHTML(item.material_name || '') + ' · ' : ''}${escapeHTML(item.description || '—')}${item.indicator ? `<br><small>Indicador: ${escapeHTML(item.indicator)}</small>` : ''}</td><td><a href="${escapeHTML(item.evidence_url)}" target="_blank" rel="noopener">Abrir</a></td><td><button type="button" data-request-id="${Number(item.id)}" data-decision="approve">Aprovar</button> <button type="button" data-request-id="${Number(item.id)}" data-decision="reject">Rejeitar</button></td></tr>`).join('')}</tbody></table>` : '<p class="empty-state">Nenhum pedido pendente.</p>';
 }
 
 function bindSupportRequests() {
@@ -532,7 +623,7 @@ function setRoleNavigation(user) {
         }
         for (const [key] of items) {
             const link = list.querySelector(`[data-role-page="${key}"]`);
-            if (link) link.hidden = !permissions.includes(key);
+            if (link) link.closest('li').hidden = !permissions.includes(key);
         }
         container.hidden = !order.length;
     }
@@ -556,9 +647,9 @@ function setRoleNavigation(user) {
 }
 
 function roleNavigationPermissions(role) {
-    if (role === 'admin') return ['dashboard', 'projetos', 'apoiadores', 'financeiro', 'metas', 'evidencias', 'relatorios', 'publico', 'contas', 'configuracoes'];
-    if (role === 'osc') return ['dashboard', 'projetos', 'financeiro', 'metas', 'evidencias', 'relatorios', 'publico', 'configuracoes'];
-    return ['apoiador', 'publico', 'configuracoes'];
+    if (role === 'admin') return ['dashboard', 'projetos', 'apoiadores', 'financeiro', 'metas', 'evidencias', 'relatorios', 'publico', 'contas', 'conta', 'configuracoes'];
+    if (role === 'osc') return ['dashboard', 'projetos', 'financeiro', 'metas', 'evidencias', 'relatorios', 'publico', 'conta', 'configuracoes'];
+    return ['apoiador', 'publico', 'conta', 'configuracoes'];
 }
 
 function applyThemePreference() {
@@ -631,6 +722,79 @@ function settingsList(items, list, order = [], allowHide = false, hiddenItems = 
     });
 }
 
+async function loadAccountPage() {
+    const overview = await apiRequest({ action: 'account-overview' });
+    const profileForm = document.getElementById('account-profile-form');
+    const status = profileForm.querySelector('[role="status"]');
+    const avatar = document.getElementById('account-avatar');
+    profileForm.elements.name.value = currentUser.name || '';
+    profileForm.elements.email.value = currentUser.email || '';
+    if (overview.avatarUrl) avatar.src = overview.avatarUrl;
+    document.getElementById('account-role-note').textContent = overview.isSupporter
+        ? 'Os totais e a classificação abaixo são atualizados diretamente pelas contribuições aprovadas.'
+        : 'Os totais individuais de doações são vinculados às contas de apoiadores.';
+    document.getElementById('account-money').textContent = money(overview.totals.money);
+    document.getElementById('account-volunteer').textContent = `${number(overview.totals.volunteer)} h`;
+    document.getElementById('account-materials').innerHTML = reportTable(
+        'Materiais doados',
+        ['Projeto', 'Material', 'Quantidade'],
+        overview.totals.materials.map((item) => [item.project, item.material_name, `${number(item.quantity)} ${item.unit}`]),
+    );
+    const moneyRanking = overview.rankings.money;
+    const volunteerRanking = overview.rankings.volunteer;
+    document.getElementById('account-money-rank').textContent = !overview.isSupporter
+        ? 'Classificação pessoal disponível para apoiadores.'
+        : moneyRanking.position
+            ? `Você está na posição ${moneyRanking.position} do ranking de dinheiro.`
+            : `Faltam ${money(moneyRanking.amountToReach)} para entrar no top 10.`;
+    document.getElementById('account-volunteer-rank').textContent = !overview.isSupporter
+        ? 'Classificação pessoal disponível para apoiadores.'
+        : volunteerRanking.position
+            ? `Você está na posição ${volunteerRanking.position} do ranking de voluntariado.`
+            : `Faltam ${number(volunteerRanking.amountToReach)} h para entrar no top 10.`;
+    profileForm.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const button = profileForm.querySelector('[type="submit"]');
+        button.disabled = true;
+        status.textContent = '';
+        try {
+            const result = await apiRequest({ action: 'account' }, {
+                method: 'POST',
+                body: JSON.stringify({ operation: 'profile', name: profileForm.elements.name.value }),
+            });
+            currentUser.name = result.name;
+            const userName = document.getElementById('current-user-name');
+            if (userName) userName.textContent = result.name;
+            status.textContent = 'Perfil atualizado.';
+        } catch (error) {
+            status.textContent = error.message;
+        } finally {
+            button.disabled = false;
+        }
+    });
+    const avatarForm = document.getElementById('account-avatar-form');
+    avatarForm.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const button = avatarForm.querySelector('[type="submit"]');
+        button.disabled = true;
+        status.textContent = '';
+        try {
+            const result = await apiRequest({ action: 'account-avatar' }, {
+                method: 'POST',
+                body: new FormData(avatarForm),
+            });
+            avatar.src = result.avatarUrl;
+            currentUser.avatar_url = result.avatarUrl;
+            status.textContent = 'Foto de perfil atualizada.';
+            avatarForm.reset();
+        } catch (error) {
+            status.textContent = error.message;
+        } finally {
+            button.disabled = false;
+        }
+    });
+}
+
 function loadSettingsPage() {
     const allowedPages = roleNavigationPermissions(currentUser.role);
     const menuOrder = currentPreferences.menuOrder || [];
@@ -662,6 +826,30 @@ function loadSettingsPage() {
         }
     });
     bindAccountManagement();
+    const identitySection = document.getElementById('public-identity-section');
+    if (currentUser.role === 'supporter') {
+        identitySection.hidden = false;
+        apiRequest({ action: 'supporter-dashboard' }).then((data) => {
+            document.querySelector('#public-identity-form [name="public_name_allowed"]').checked = data.publicNameAllowed;
+        }).catch((error) => notify(error.message));
+        document.getElementById('public-identity-form').addEventListener('submit', async (event) => {
+            event.preventDefault();
+            const form = event.currentTarget;
+            const status = form.querySelector('[role="status"]');
+            try {
+                await apiRequest({ action: 'account' }, {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        operation: 'public-name-visibility',
+                        allowed: form.elements.public_name_allowed.checked,
+                    }),
+                });
+                status.textContent = 'Sua autorização de exibição foi atualizada.';
+            } catch (error) {
+                status.textContent = error.message;
+            }
+        });
+    }
 }
 
 function collectOrder(listId) {
@@ -675,31 +863,6 @@ function collectHiddenCards() {
 }
 
 function bindAccountManagement() {
-    const profileForm = document.getElementById('profile-form');
-    profileForm.elements.name.value = currentUser.name || '';
-    profileForm.elements.email.value = currentUser.email || '';
-    profileForm.addEventListener('submit', async (event) => {
-        event.preventDefault();
-        const status = profileForm.querySelector('[role="status"]');
-        const button = profileForm.querySelector('[type="submit"]');
-        button.disabled = true;
-        status.textContent = '';
-        try {
-            const result = await apiRequest({ action: 'account' }, {
-                method: 'POST',
-                body: JSON.stringify({ operation: 'profile', name: profileForm.elements.name.value }),
-            });
-            currentUser.name = result.name;
-            const userName = document.getElementById('current-user-name');
-            if (userName) userName.textContent = result.name;
-            status.textContent = 'Perfil atualizado.';
-        } catch (error) {
-            status.textContent = error.message;
-        } finally {
-            button.disabled = false;
-        }
-    });
-
     const passwordForm = document.getElementById('password-form');
     passwordForm.addEventListener('submit', async (event) => {
         event.preventDefault();
@@ -832,9 +995,11 @@ async function initialize() {
             const button = signupForm.querySelector('[type="submit"]');
             button.disabled = true;
             try {
-                await apiRequest({ action: 'register-supporter' }, { method: 'POST', body: JSON.stringify(Object.fromEntries(new FormData(signupForm))) });
-                notify('Conta criada. Entre com seu e-mail e senha.');
-                signupForm.reset();
+                const response = await apiRequest({ action: 'register-supporter' }, {
+                    method: 'POST',
+                    body: JSON.stringify(Object.fromEntries(new FormData(signupForm))),
+                });
+                window.location.href = response.user.role === 'supporter' ? 'apoiador.html' : 'dashboard.html';
             } catch (error) {
                 signupForm.querySelector('[role="alert"]').textContent = error.message;
             } finally {
@@ -857,12 +1022,14 @@ async function initialize() {
             return;
         }
         currentUser = current.user;
-        if (currentUser.role === 'supporter' && !['apoiador.html', 'configuracoes.html'].includes(page)) {
+        currentPreferences = await apiRequest({ action: 'preferences' });
+        setRoleNavigation(currentUser);
+        if (currentUser.role === 'supporter' && !['apoiador.html', 'conta.html', 'configuracoes.html'].includes(page)) {
             const content = document.querySelector('.content');
             content.innerHTML = '<div class="page-header"><div><h1>Área restrita</h1><p>Esta página contém ferramentas de gestão. Você pode acompanhar seus pedidos ou consultar a transparência pública.</p><p><a class="btn" href="apoiador.html">Meu apoio</a> <a class="btn" href="publico.html">Página pública</a></p></div></div>';
             return;
         }
-        const oscPages = ['dashboard.html', 'financeiro.html', 'metas.html', 'evidencias.html', 'projetos.html', 'relatorios.html', 'configuracoes.html'];
+        const oscPages = ['dashboard.html', 'financeiro.html', 'metas.html', 'evidencias.html', 'projetos.html', 'relatorios.html', 'conta.html', 'configuracoes.html'];
         if (currentUser.role === 'osc' && !oscPages.includes(page)) {
             window.location.href = 'dashboard.html';
             return;
@@ -871,11 +1038,10 @@ async function initialize() {
             window.location.href = 'dashboard.html';
             return;
         }
-        currentPreferences = await apiRequest({ action: 'preferences' });
-        setRoleNavigation(currentUser);
     }
 
     if (isPublic) return loadPublicPage();
+    if (page === 'conta.html') return loadAccountPage();
     if (page === 'configuracoes.html') return loadSettingsPage();
     if (page === 'apoiador.html') return loadSupporterPage();
     if (page === 'dashboard.html') return loadDashboard();

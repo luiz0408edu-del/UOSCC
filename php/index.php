@@ -40,14 +40,30 @@ try {
         if ($name === '' || strlen($name) > 200 || !filter_var($email, FILTER_VALIDATE_EMAIL) || strlen($password) < 12 || !in_array($type, ['Pessoa', 'Empresa'], true)) {
             respond(['error' => 'Informe nome, e-mail válido, tipo e senha com pelo menos 12 caracteres.'], 422);
         }
+        $existingUser = $pdo->prepare('SELECT 1 FROM users WHERE email = ?');
+        $existingUser->execute([$email]);
+        if ($existingUser->fetchColumn()) {
+            respond(['error' => 'Já existe uma conta com este e-mail. Faça login ou use outro endereço.'], 409);
+        }
         $pdo->beginTransaction();
         $supporterInsert = $pdo->prepare('INSERT INTO supporters (name, type, public_token) VALUES (?, ?, ?)');
         $supporterInsert->execute([$name, $type, bin2hex(random_bytes(16))]);
         $supporterId = (int) $pdo->lastInsertId();
         $userInsert = $pdo->prepare('INSERT INTO users (email, password_hash, role, display_name, supporter_id) VALUES (?, ?, ?, ?, ?)');
         $userInsert->execute([$email, password_hash($password, PASSWORD_DEFAULT), 'supporter', $name, $supporterId]);
+        $userId = (int) $pdo->lastInsertId();
         $pdo->commit();
-        respond(['created' => true], 201);
+        session_regenerate_id(true);
+        $_SESSION['user_id'] = $userId;
+        $_SESSION['email'] = $email;
+        $_SESSION['display_name'] = $name;
+        $_SESSION['role'] = 'supporter';
+        $_SESSION['organization'] = null;
+        $_SESSION['supporter_id'] = $supporterId;
+        respond([
+            'created' => true,
+            'user' => ['email' => $email, 'name' => $name, 'role' => 'supporter', 'organization' => null],
+        ], 201);
     }
 
     if ($action === 'login' && $method === 'POST') {
@@ -82,8 +98,12 @@ try {
     if ($action === 'upload' && $method === 'POST') {
         require_role(['admin', 'osc']);
         $file = $_FILES['file'] ?? null;
-        if (!is_array($file) || ($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK || ($file['size'] ?? 0) > 25 * 1024 * 1024) {
-            respond(['error' => 'Selecione um arquivo válido de até 25 MB.'], 422);
+        $uploadError = is_array($file) ? ($file['error'] ?? UPLOAD_ERR_NO_FILE) : UPLOAD_ERR_NO_FILE;
+        if ($uploadError !== UPLOAD_ERR_OK || ($file['size'] ?? 0) > 100 * 1024 * 1024) {
+            $message = in_array($uploadError, [UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_FORM_SIZE], true) || (is_array($file) && ($file['size'] ?? 0) > 100 * 1024 * 1024)
+                ? 'O arquivo ultrapassa o limite de 100 MB.'
+                : 'Selecione um arquivo válido.';
+            respond(['error' => $message], 422);
         }
         $mime = (new finfo(FILEINFO_MIME_TYPE))->file($file['tmp_name']);
         $extensions = [
@@ -109,9 +129,11 @@ try {
     if ($action === 'me') {
         $user = empty($_SESSION['user_id']) ? null : current_user();
         if ($user) {
-            $nameQuery = $pdo->prepare('SELECT display_name FROM users WHERE id = ?');
+            $nameQuery = $pdo->prepare('SELECT display_name, avatar_url FROM users WHERE id = ?');
             $nameQuery->execute([$user['id']]);
-            $user['name'] = (string) ($nameQuery->fetchColumn() ?: $user['email']);
+            $userProfile = $nameQuery->fetch();
+            $user['name'] = (string) ($userProfile['display_name'] ?: $user['email']);
+            $user['avatar_url'] = $userProfile['avatar_url'];
             if ($user['role'] === 'supporter') {
                 $supporterNameQuery = $pdo->prepare('SELECT name FROM supporters WHERE id = ?');
                 $supporterNameQuery->execute([$user['supporter_id']]);
@@ -122,34 +144,82 @@ try {
         respond(['user' => $user]);
     }
 
+    if ($action === 'account-avatar' && $method === 'POST') {
+        require_login();
+        $file = $_FILES['avatar'] ?? null;
+        $uploadError = is_array($file) ? ($file['error'] ?? UPLOAD_ERR_NO_FILE) : UPLOAD_ERR_NO_FILE;
+        if ($uploadError !== UPLOAD_ERR_OK || ($file['size'] ?? 0) > 5 * 1024 * 1024) {
+            $message = in_array($uploadError, [UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_FORM_SIZE], true) || (is_array($file) && ($file['size'] ?? 0) > 5 * 1024 * 1024)
+                ? 'A foto de perfil deve ter no máximo 5 MB.'
+                : 'Selecione uma imagem válida.';
+            respond(['error' => $message], 422);
+        }
+        $mime = (new finfo(FILEINFO_MIME_TYPE))->file($file['tmp_name']);
+        $extensions = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/webp' => 'webp'];
+        if (!isset($extensions[$mime]) || !getimagesize($file['tmp_name'])) {
+            respond(['error' => 'A foto deve ser uma imagem JPEG, PNG ou WebP válida.'], 422);
+        }
+        $uploadDirectory = dirname(__DIR__) . '/uploads/avatars';
+        if (!is_dir($uploadDirectory) && !mkdir($uploadDirectory, 0770, true) && !is_dir($uploadDirectory)) {
+            throw new RuntimeException('Não foi possível criar a pasta de fotos de perfil.');
+        }
+        $filename = bin2hex(random_bytes(16)) . '.' . $extensions[$mime];
+        if (!move_uploaded_file($file['tmp_name'], $uploadDirectory . '/' . $filename)) {
+            throw new RuntimeException('Não foi possível armazenar a foto de perfil.');
+        }
+        $avatarUrl = '../uploads/avatars/' . $filename;
+        $updateAvatar = $pdo->prepare('UPDATE users SET avatar_url = ? WHERE id = ?');
+        $updateAvatar->execute([$avatarUrl, current_user()['id']]);
+        respond(['avatarUrl' => $avatarUrl]);
+    }
+
     if ($entity === 'public' && $method === 'GET') {
-        $publicResources = $pdo->query("SELECT r.date, p.name AS project, r.type, r.quantity, r.`usage` AS `usage`
-            FROM resources r LEFT JOIN projects p ON p.id = r.project_id
-            ORDER BY r.date DESC, r.id DESC")->fetchAll();
-        $publicEvidences = $pdo->query('SELECT e.date, p.name AS project, e.title, e.type, e.url, e.description
-            FROM evidences e JOIN projects p ON p.id = e.project_id ORDER BY e.date DESC, e.id DESC')->fetchAll();
+        $filters = public_filters($_GET);
+        [$resourceDates, $resourceValues] = date_filters('r', $filters);
+        [$resourceOrganization, $resourceOrganizationValues] = organization_filter('p', $filters);
+        $resourceWhere = [...$resourceDates, ...$resourceOrganization];
+        $resourceWhereSql = $resourceWhere ? ' WHERE ' . implode(' AND ', $resourceWhere) : '';
+        $publicResourcesQuery = $pdo->prepare("SELECT r.date, p.name AS project, p.organization, r.type, r.quantity, r.material_name, r.unit,
+        CASE WHEN s.public_name_allowed = 1 THEN s.name ELSE 'Apoiador anônimo' END AS supporter, r.`usage` AS `usage`
+        FROM resources r JOIN projects p ON p.id = r.project_id LEFT JOIN supporters s ON s.id = r.supporter_id{$resourceWhereSql}
+        ORDER BY r.date DESC, r.id DESC");
+        $publicResourcesQuery->execute([...$resourceValues, ...$resourceOrganizationValues]);
+        $publicResources = $publicResourcesQuery->fetchAll();
+        [$evidenceDates, $evidenceValues] = date_filters('e', $filters);
+        [$evidenceOrganization, $evidenceOrganizationValues] = organization_filter('p', $filters);
+        $evidenceWhere = [...$evidenceDates, ...$evidenceOrganization];
+        $evidenceWhereSql = $evidenceWhere ? ' WHERE ' . implode(' AND ', $evidenceWhere) : '';
+        $publicEvidencesQuery = $pdo->prepare('SELECT e.date, p.name AS project, e.title, e.type, e.url, e.description
+        FROM evidences e JOIN projects p ON p.id = e.project_id' . $evidenceWhereSql . ' ORDER BY e.date DESC, e.id DESC');
+        $publicEvidencesQuery->execute([...$evidenceValues, ...$evidenceOrganizationValues]);
+        $publicEvidences = $publicEvidencesQuery->fetchAll();
         $donation = null;
         $token = (string) ($_GET['token'] ?? '');
         if ($token !== '') {
             if (!preg_match('/^[a-f0-9]{32}$/', $token)) {
                 respond(['error' => 'Código de consulta inválido.'], 422);
             }
-            $supporterQuery = $pdo->prepare('SELECT id, name FROM supporters WHERE public_token = ?');
+            $supporterQuery = $pdo->prepare('SELECT id, name, public_name_allowed FROM supporters WHERE public_token = ?');
             $supporterQuery->execute([$token]);
             $supporter = $supporterQuery->fetch();
             if ($supporter) {
-                $donationsQuery = $pdo->prepare("SELECT r.date, p.name AS project, r.type, r.quantity, r.`usage` AS `usage`
+                $donationsQuery = $pdo->prepare("SELECT r.date, p.name AS project, r.type, r.quantity, r.material_name, r.unit, r.`usage` AS `usage`
                     FROM resources r LEFT JOIN projects p ON p.id = r.project_id
                     WHERE r.supporter_id = ? ORDER BY r.date DESC, r.id DESC");
                 $donationsQuery->execute([$supporter['id']]);
-                $donation = ['name' => $supporter['name'], 'resources' => $donationsQuery->fetchAll()];
+                $donation = [
+                    'name' => (bool) $supporter['public_name_allowed'] ? $supporter['name'] : 'Apoiador anônimo',
+                    'resources' => $donationsQuery->fetchAll(),
+                ];
             }
         }
         respond([
-            'summary' => dashboard_data($pdo),
-            'projects' => entity_rows($pdo, 'projects'),
+            'summary' => dashboard_data($pdo, $filters),
+            'projects' => entity_rows($pdo, 'projects', $filters),
             'resources' => $publicResources,
             'evidences' => $publicEvidences,
+            'rankings' => supporter_rankings($pdo),
+            'organizations' => $pdo->query('SELECT DISTINCT organization FROM projects ORDER BY organization')->fetchAll(PDO::FETCH_COLUMN),
             'donation' => $donation,
         ]);
     }
@@ -164,7 +234,7 @@ try {
     }
     if ($action === 'preferences' && $method === 'POST') {
         $input = request_data();
-        $allowedPages = ['dashboard', 'projetos', 'apoiadores', 'financeiro', 'metas', 'evidencias', 'relatorios', 'publico', 'apoiador', 'contas', 'configuracoes'];
+        $allowedPages = ['dashboard', 'projetos', 'apoiadores', 'financeiro', 'metas', 'evidencias', 'relatorios', 'publico', 'apoiador', 'contas', 'conta', 'configuracoes'];
         $allowedCards = ['dinheiro', 'voluntariado', 'pessoas', 'metas', 'evidencias'];
         $preferences = [
             'theme' => ($input['theme'] ?? '') === 'dark' ? 'dark' : 'light',
@@ -175,7 +245,7 @@ try {
         $menuGroups = [
             ['apoiador', 'dashboard'],
             ['projetos', 'apoiadores', 'financeiro', 'metas', 'evidencias', 'relatorios'],
-            ['publico', 'contas', 'configuracoes'],
+            ['publico', 'contas', 'conta', 'configuracoes'],
         ];
         foreach ($menuGroups as $group) {
             $available = array_values(array_intersect($group, $allowedPages));
@@ -186,10 +256,57 @@ try {
         $savePreferences->execute([json_encode($preferences, JSON_UNESCAPED_UNICODE), current_user()['id']]);
         respond($preferences);
     }
+    if ($action === 'account-overview' && $method === 'GET') {
+        $user = current_user();
+        $supporterId = $user['role'] === 'supporter' ? $user['supporter_id'] : null;
+        $totals = ['money' => 0.0, 'volunteer' => 0.0];
+        $materials = [];
+        if ($supporterId !== null) {
+            $totalsQuery = $pdo->prepare("SELECT
+                COALESCE(SUM(CASE WHEN type = 'Dinheiro' THEN quantity ELSE 0 END), 0) AS money,
+                COALESCE(SUM(CASE WHEN type = 'Voluntariado' THEN quantity ELSE 0 END), 0) AS volunteer
+                FROM resources WHERE supporter_id = ?");
+            $totalsQuery->execute([$supporterId]);
+            $totals = $totalsQuery->fetch();
+            $materialsQuery = $pdo->prepare("SELECT p.name AS project,
+                COALESCE(NULLIF(r.material_name, ''), 'Material sem descrição') AS material_name,
+                COALESCE(NULLIF(r.unit, ''), 'Unidade não informada') AS unit,
+                SUM(r.quantity) AS quantity
+                FROM resources r JOIN projects p ON p.id = r.project_id
+                WHERE r.supporter_id = ? AND r.type = 'Material'
+                GROUP BY p.id, p.name, COALESCE(NULLIF(r.material_name, ''), 'Material sem descrição'), COALESCE(NULLIF(r.unit, ''), 'Unidade não informada')
+                ORDER BY p.name, r.material_name, r.unit");
+            $materialsQuery->execute([$supporterId]);
+            $materials = $materialsQuery->fetchAll();
+        }
+        $profileQuery = $pdo->prepare('SELECT avatar_url FROM users WHERE id = ?');
+        $profileQuery->execute([$user['id']]);
+        respond([
+            'role' => $user['role'],
+            'isSupporter' => $supporterId !== null,
+            'avatarUrl' => $profileQuery->fetchColumn() ?: null,
+            'totals' => [
+                'money' => (float) $totals['money'],
+                'volunteer' => (float) $totals['volunteer'],
+                'materials' => $materials,
+            ],
+            'rankings' => supporter_rankings($pdo, $supporterId),
+        ]);
+    }
     if ($action === 'account' && $method === 'POST') {
         $input = request_data();
         $operation = (string) ($input['operation'] ?? '');
         $user = current_user();
+        if ($operation === 'public-name-visibility') {
+            require_role(['supporter']);
+            $allowed = filter_var($input['allowed'] ?? null, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+            if ($allowed === null) {
+                respond(['error' => 'Informe se autoriza ou não a exibição pública do nome.'], 422);
+            }
+            $visibility = $pdo->prepare('UPDATE supporters SET public_name_allowed = ? WHERE id = ?');
+            $visibility->execute([$allowed ? 1 : 0, $user['supporter_id']]);
+            respond(['publicNameAllowed' => $allowed]);
+        }
         if ($operation === 'profile') {
             $name = trim((string) ($input['name'] ?? ''));
             if ($name === '' || strlen($name) > 200) {
@@ -319,14 +436,25 @@ try {
         $indicatorId = $indicatorInput === '' ? null : filter_var($indicatorInput, FILTER_VALIDATE_INT);
         $type = trim((string) ($_POST['type'] ?? ''));
         $quantity = filter_var($_POST['quantity'] ?? null, FILTER_VALIDATE_FLOAT);
+        $materialName = trim((string) ($_POST['material_name'] ?? ''));
+        $unit = trim((string) ($_POST['unit'] ?? ''));
         $description = trim((string) ($_POST['description'] ?? ''));
-        if (!$projectId || $indicatorId === false || !in_array($type, ['Dinheiro', 'Material', 'Voluntariado'], true) || $quantity === false || !is_finite((float) $quantity) || $quantity <= 0 || strlen($description) > 2000) {
+        $validUnits = ['kg', 'g', 'litro', 'ml', 'unidade', 'peça', 'caixa', 'pacote'];
+        if (!$projectId || $indicatorId === false || !in_array($type, ['Dinheiro', 'Material', 'Voluntariado'], true) || $quantity === false || !is_finite((float) $quantity) || $quantity <= 0 || strlen($description) > 2000 || ($type === 'Material' && ($materialName === '' || strlen($materialName) > 200 || !in_array($unit, $validUnits, true)))) {
             respond(['error' => 'Confira o projeto, tipo, quantidade e descrição do apoio.'], 422);
         }
-        $projectCheck = $pdo->prepare('SELECT COUNT(*) FROM projects WHERE id = ?');
+        $projectCheck = $pdo->prepare('SELECT accepted_resources FROM projects WHERE id = ?');
         $projectCheck->execute([$projectId]);
-        if ((int) $projectCheck->fetchColumn() !== 1) {
+        $projectAcceptedResources = $projectCheck->fetchColumn();
+        if ($projectAcceptedResources === false) {
             respond(['error' => 'Selecione um projeto válido.'], 422);
+        }
+        $acceptedResources = json_decode((string) $projectAcceptedResources, true);
+        if (!is_array($acceptedResources)) {
+            $acceptedResources = ['Dinheiro', 'Material', 'Voluntariado'];
+        }
+        if (!in_array($type, $acceptedResources, true)) {
+            respond(['error' => 'Desculpe, esse projeto não recebe ou aceita esse tipo de recurso. Apenas os recursos: ' . implode(', ', $acceptedResources) . '.'], 422);
         }
         if ($indicatorId !== null) {
             $indicatorCheck = $pdo->prepare('SELECT COUNT(*) FROM indicators WHERE id = ? AND project_id = ?');
@@ -336,8 +464,12 @@ try {
             }
         }
         $file = $_FILES['file'] ?? null;
-        if (!is_array($file) || ($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK || ($file['size'] ?? 0) > 25 * 1024 * 1024) {
-            respond(['error' => 'Anexe um comprovante válido de até 25 MB.'], 422);
+        $uploadError = is_array($file) ? ($file['error'] ?? UPLOAD_ERR_NO_FILE) : UPLOAD_ERR_NO_FILE;
+        if ($uploadError !== UPLOAD_ERR_OK || ($file['size'] ?? 0) > 100 * 1024 * 1024) {
+            $message = in_array($uploadError, [UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_FORM_SIZE], true) || (is_array($file) && ($file['size'] ?? 0) > 100 * 1024 * 1024)
+                ? 'O arquivo ultrapassa o limite de 100 MB.'
+                : 'Anexe um comprovante válido.';
+            respond(['error' => $message], 422);
         }
         $mime = (new finfo(FILEINFO_MIME_TYPE))->file($file['tmp_name']);
         $extensions = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/gif' => 'gif', 'image/webp' => 'webp', 'application/pdf' => 'pdf'];
@@ -352,8 +484,8 @@ try {
         if (!move_uploaded_file($file['tmp_name'], $uploadDirectory . '/' . $filename)) {
             throw new RuntimeException('Não foi possível armazenar o comprovante.');
         }
-        $insert = $pdo->prepare('INSERT INTO support_requests (supporter_id, project_id, indicator_id, type, quantity, description, evidence_url) VALUES (?, ?, ?, ?, ?, ?, ?)');
-        $insert->execute([current_user()['supporter_id'], $projectId, $indicatorId, $type, $quantity, $description, $filename]);
+        $insert = $pdo->prepare('INSERT INTO support_requests (supporter_id, project_id, indicator_id, type, quantity, material_name, unit, description, evidence_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
+        $insert->execute([current_user()['supporter_id'], $projectId, $indicatorId, $type, $quantity, $type === 'Material' ? $materialName : null, $type === 'Material' ? $unit : null, $description, $filename]);
         respond(['created' => true, 'id' => (int) $pdo->lastInsertId()], 201);
     }
 
@@ -394,26 +526,35 @@ try {
         $supporterId = current_user()['supporter_id'];
         $supporterQuery = $pdo->prepare('SELECT name FROM supporters WHERE id = ?');
         $supporterQuery->execute([$supporterId]);
-        $statement = $pdo->prepare("SELECT r.date, p.name AS project, r.type, r.quantity, r.usage
+        $statement = $pdo->prepare("SELECT r.date, p.name AS project, r.type, r.quantity, r.material_name, r.unit, r.usage
             FROM resources r LEFT JOIN projects p ON p.id = r.project_id
             WHERE r.supporter_id = ? ORDER BY r.date DESC, r.id DESC");
         $statement->execute([$supporterId]);
         $resources = $statement->fetchAll();
-        $requestsQuery = $pdo->prepare('SELECT sr.id, p.name AS project, sr.type, sr.quantity, sr.description, sr.evidence_url, sr.status, sr.created_at, i.name AS indicator FROM support_requests sr JOIN projects p ON p.id = sr.project_id LEFT JOIN indicators i ON i.id = sr.indicator_id WHERE sr.supporter_id = ? ORDER BY sr.created_at DESC, sr.id DESC');
+        $requestsQuery = $pdo->prepare('SELECT sr.id, p.name AS project, sr.type, sr.quantity, sr.material_name, sr.unit, sr.description, sr.evidence_url, sr.status, sr.created_at, i.name AS indicator FROM support_requests sr JOIN projects p ON p.id = sr.project_id LEFT JOIN indicators i ON i.id = sr.indicator_id WHERE sr.supporter_id = ? ORDER BY sr.created_at DESC, sr.id DESC');
         $requestsQuery->execute([$supporterId]);
-        $projects = $pdo->query('SELECT p.id, p.name, p.organization FROM projects p ORDER BY p.name')->fetchAll();
+        $projects = $pdo->query('SELECT p.id, p.name, p.organization, p.accepted_resources FROM projects p ORDER BY p.name')->fetchAll();
+        foreach ($projects as &$project) {
+            $acceptedResources = json_decode((string) ($project['accepted_resources'] ?? ''), true);
+            $project['accepted_resources'] = is_array($acceptedResources)
+                ? array_values(array_intersect($acceptedResources, ['Dinheiro', 'Material', 'Voluntariado']))
+                : ['Dinheiro', 'Material', 'Voluntariado'];
+        }
+        unset($project);
         $indicators = $pdo->query('SELECT i.id, i.project_id, i.name FROM indicators i JOIN projects p ON p.id = i.project_id ORDER BY p.name, i.name')->fetchAll();
         $requests = $requestsQuery->fetchAll();
         foreach ($requests as &$request) {
             $request['evidence_url'] = '../php/index.php?action=support-request-file&id=' . $request['id'];
         }
         unset($request);
-        respond(['name' => $supporterQuery->fetchColumn(), 'resources' => $resources, 'total' => count($resources), 'requests' => $requests, 'projects' => $projects, 'indicators' => $indicators]);
+        $visibilityQuery = $pdo->prepare('SELECT public_name_allowed FROM supporters WHERE id = ?');
+        $visibilityQuery->execute([$supporterId]);
+        respond(['name' => $supporterQuery->fetchColumn(), 'publicNameAllowed' => (bool) $visibilityQuery->fetchColumn(), 'resources' => $resources, 'total' => count($resources), 'requests' => $requests, 'projects' => $projects, 'indicators' => $indicators]);
     }
 
     if ($action === 'support-requests' && $method === 'GET') {
         require_role(['admin', 'osc']);
-        $query = 'SELECT sr.id, sr.project_id, sr.indicator_id, sr.type, sr.quantity, sr.description, sr.evidence_url, sr.created_at, s.name AS supporter, p.name AS project, p.organization, i.name AS indicator FROM support_requests sr JOIN supporters s ON s.id = sr.supporter_id JOIN projects p ON p.id = sr.project_id LEFT JOIN indicators i ON i.id = sr.indicator_id WHERE sr.status = ?';
+        $query = 'SELECT sr.id, sr.project_id, sr.indicator_id, sr.type, sr.quantity, sr.material_name, sr.unit, sr.description, sr.evidence_url, sr.created_at, s.name AS supporter, p.name AS project, p.organization, i.name AS indicator FROM support_requests sr JOIN supporters s ON s.id = sr.supporter_id JOIN projects p ON p.id = sr.project_id LEFT JOIN indicators i ON i.id = sr.indicator_id WHERE sr.status = ?';
         $values = ['pending'];
         if (current_user()['role'] === 'osc') {
             $query .= ' AND p.organization = ?';
@@ -439,7 +580,7 @@ try {
             respond(['error' => 'Solicitação ou decisão inválida.'], 422);
         }
         $pdo->beginTransaction();
-        $requestQuery = $pdo->prepare('SELECT sr.*, p.organization FROM support_requests sr JOIN projects p ON p.id = sr.project_id WHERE sr.id = ? AND sr.status = ?');
+        $requestQuery = $pdo->prepare('SELECT sr.*, p.organization, p.accepted_resources FROM support_requests sr JOIN projects p ON p.id = sr.project_id WHERE sr.id = ? AND sr.status = ?');
         $requestQuery->execute([$requestId, 'pending']);
         $supportRequest = $requestQuery->fetch();
         if (!$supportRequest) {
@@ -450,10 +591,20 @@ try {
             $pdo->rollBack();
             respond(['error' => 'Esta solicitação pertence a outra OSC.'], 403);
         }
+        if ($decision === 'approve') {
+            $acceptedResources = json_decode((string) ($supportRequest['accepted_resources'] ?? ''), true);
+            if (!is_array($acceptedResources)) {
+                $acceptedResources = ['Dinheiro', 'Material', 'Voluntariado'];
+            }
+            if (!in_array($supportRequest['type'], $acceptedResources, true)) {
+                $pdo->rollBack();
+                respond(['error' => 'Este projeto não aceita mais esse tipo de recurso.'], 409);
+            }
+        }
         $resourceId = null;
         if ($decision === 'approve') {
-            $resourceInsert = $pdo->prepare('INSERT INTO resources (date, project_id, type, quantity, supporter_id, indicator_id, `usage`) VALUES (?, ?, ?, ?, ?, ?, ?)');
-            $resourceInsert->execute([date('Y-m-d'), $supportRequest['project_id'], $supportRequest['type'], $supportRequest['quantity'], $supportRequest['supporter_id'], $supportRequest['indicator_id'], $supportRequest['description']]);
+            $resourceInsert = $pdo->prepare('INSERT INTO resources (date, project_id, type, quantity, supporter_id, indicator_id, material_name, unit, `usage`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
+            $resourceInsert->execute([date('Y-m-d'), $supportRequest['project_id'], $supportRequest['type'], $supportRequest['quantity'], $supportRequest['supporter_id'], $supportRequest['indicator_id'], $supportRequest['material_name'], $supportRequest['unit'], $supportRequest['description']]);
             $resourceId = (int) $pdo->lastInsertId();
         }
         $status = $decision === 'approve' ? 'approved' : 'rejected';
@@ -473,7 +624,8 @@ try {
     }
     if ($action === 'dashboard' && $method === 'GET') {
         require_role(['admin', 'osc']);
-        respond(dashboard_data($pdo, scoped_filters([])));
+        $filters = public_filters($_GET);
+        respond(dashboard_data($pdo, scoped_filters($filters)));
     }
     if ($action === 'save-report-note' && $method === 'POST') {
         require_role(['admin']);
@@ -572,12 +724,29 @@ try {
     if ($method === 'POST' || $method === 'PUT') {
         $input = request_data();
         $values = [];
-        foreach ($definition['fields'] as $field) {
+        $entityFields = $definition['fields'];
+        if ($role === 'osc' && $entity === 'projects') {
+            $entityFields = array_values(array_diff($entityFields, ['accepted_resources']));
+        }
+        foreach ($entityFields as $field) {
             $value = $input[$field] ?? null;
             if ($role === 'osc' && $entity === 'projects' && $field === 'organization') {
                 $value = current_user()['organization'];
             }
-            if (in_array($field, ['project_id', 'supporter_id', 'indicator_id'], true)) {
+            if ($entity === 'projects' && $field === 'accepted_resources') {
+                $allowedResourceTypes = ['Dinheiro', 'Material', 'Voluntariado'];
+                if (!is_array($value) || array_filter($value, static fn ($type): bool => !is_string($type))) {
+                    respond(['error' => 'Selecione tipos de recurso válidos.'], 422);
+                }
+                $value = array_values(array_unique($value));
+                if (array_diff($value, $allowedResourceTypes)) {
+                    respond(['error' => 'Selecione apenas tipos de recurso válidos.'], 422);
+                }
+                if (!$value) {
+                    respond(['error' => 'Selecione pelo menos um tipo de recurso aceito pelo projeto.'], 422);
+                }
+                $value = json_encode($value, JSON_UNESCAPED_UNICODE);
+            } elseif (in_array($field, ['project_id', 'supporter_id', 'indicator_id'], true)) {
                 $value = $value === '' || $value === null ? null : filter_var($value, FILTER_VALIDATE_INT);
                 if ($value === false) {
                     respond(['error' => "O campo {$field} precisa ser um identificador válido."], 422);
@@ -592,6 +761,11 @@ try {
                 if ($value !== null && ($value === false || $value < 0)) {
                     respond(['error' => "O campo {$field} precisa ser um número igual ou maior que zero."], 422);
                 }
+            } elseif ($entity === 'resources' && in_array($field, ['material_name', 'unit'], true)) {
+                if ($value !== null && !is_string($value)) {
+                    respond(['error' => "O campo {$field} precisa ser um texto válido."], 422);
+                }
+                $value = $value === null ? null : trim($value);
             } elseif ($value !== null) {
                 $value = trim((string) $value);
             }
@@ -625,6 +799,32 @@ try {
         }
         if ($entity === 'projects' && !in_array($values['organization'], osc_areas(), true)) {
             respond(['error' => 'Selecione uma das seis áreas de atuação cadastradas.'], 422);
+        }
+        if ($entity === 'resources') {
+            $projectQuery = $pdo->prepare('SELECT accepted_resources FROM projects WHERE id = ?');
+            $projectQuery->execute([$values['project_id']]);
+            $acceptedResourcesJson = $projectQuery->fetchColumn();
+            if ($acceptedResourcesJson === false) {
+                respond(['error' => 'Selecione um projeto válido.'], 422);
+            }
+            $acceptedResources = json_decode((string) $acceptedResourcesJson, true);
+            if (!is_array($acceptedResources)) {
+                $acceptedResources = ['Dinheiro', 'Material', 'Voluntariado'];
+            }
+            if (!in_array($values['type'], ['Dinheiro', 'Material', 'Voluntariado'], true)) {
+                respond(['error' => 'Selecione um tipo de recurso válido.'], 422);
+            }
+            if (!in_array($values['type'], $acceptedResources, true)) {
+                respond(['error' => 'Desculpe, esse projeto não recebe ou aceita esse tipo de recurso. Apenas os recursos: ' . implode(', ', $acceptedResources) . '.'], 422);
+            }
+            if ($values['type'] === 'Material') {
+                if ($values['material_name'] === null || $values['material_name'] === '' || strlen($values['material_name']) > 200 || !in_array($values['unit'], ['kg', 'g', 'litro', 'ml', 'unidade', 'peça', 'caixa', 'pacote'], true)) {
+                    respond(['error' => 'Informe o material e selecione uma unidade válida.'], 422);
+                }
+            } else {
+                $values['material_name'] = null;
+                $values['unit'] = null;
+            }
         }
         if ($entity === 'resources' && $values['indicator_id'] !== null) {
             $indicatorCheck = $pdo->prepare('SELECT COUNT(*) FROM indicators WHERE id = ? AND project_id = ?');
@@ -699,6 +899,9 @@ try {
 } catch (PDOException $exception) {
     if (isset($pdo) && $pdo instanceof PDO && $pdo->inTransaction()) {
         $pdo->rollBack();
+    }
+    if (($action ?? '') === 'register-supporter' && $exception->getCode() === '23000') {
+        respond(['error' => 'Já existe uma conta com este e-mail. Faça login ou use outro endereço.'], 409);
     }
     respond(['error' => 'Não foi possível salvar os dados. Verifique os vínculos e campos informados.'], 409);
 } catch (Throwable $exception) {

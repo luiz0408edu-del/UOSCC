@@ -2,7 +2,8 @@ CREATE TABLE IF NOT EXISTS supporters (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
     name VARCHAR(200) NOT NULL,
     type VARCHAR(50) NOT NULL,
-    public_token CHAR(32) NOT NULL UNIQUE
+    public_token CHAR(32) NOT NULL UNIQUE,
+    public_name_allowed TINYINT(1) NOT NULL DEFAULT 0
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS users (
@@ -11,6 +12,7 @@ CREATE TABLE IF NOT EXISTS users (
     password_hash VARCHAR(255) NOT NULL,
     role VARCHAR(20) NOT NULL DEFAULT 'admin',
     display_name VARCHAR(200) NULL,
+    avatar_url VARCHAR(255) NULL,
     organization VARCHAR(200) NULL,
     supporter_id BIGINT UNSIGNED NULL UNIQUE,
     preferences TEXT NULL,
@@ -35,6 +37,7 @@ CREATE TABLE IF NOT EXISTS projects (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
     name VARCHAR(200) NOT NULL,
     organization VARCHAR(200) NOT NULL,
+    accepted_resources TEXT NULL,
     INDEX idx_projects_organization (organization)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -70,6 +73,8 @@ CREATE TABLE IF NOT EXISTS resources (
     quantity DECIMAL(15, 2) NOT NULL,
     supporter_id BIGINT UNSIGNED NULL,
     indicator_id BIGINT UNSIGNED NULL,
+    material_name VARCHAR(200) NULL,
+    unit VARCHAR(20) NULL,
     `usage` TEXT NOT NULL,
     INDEX idx_resources_date (date),
     INDEX idx_resources_project (project_id),
@@ -100,6 +105,8 @@ CREATE TABLE IF NOT EXISTS support_requests (
     indicator_id BIGINT UNSIGNED NULL,
     type VARCHAR(40) NOT NULL,
     quantity DECIMAL(15, 2) NOT NULL,
+    material_name VARCHAR(200) NULL,
+    unit VARCHAR(20) NULL,
     description TEXT NOT NULL,
     evidence_url VARCHAR(500) NOT NULL,
     status VARCHAR(20) NOT NULL DEFAULT 'pending',

@@ -44,7 +44,8 @@ function respond(array $payload, int $status = 200): never
 
 function request_data(): array
 {
-    $data = json_decode((string) file_get_contents('php://input'), true);
+    $raw = (string) file_get_contents('php://input');
+    $data = json_decode($raw, true);
     return is_array($data) ? $data : [];
 }
 
@@ -101,7 +102,7 @@ function entity_fields(): array
     return [
         'projects' => [
             'table' => 'projects',
-            'fields' => ['name', 'organization'],
+            'fields' => ['name', 'organization', 'accepted_resources'],
             'required' => ['name', 'organization'],
         ],
         'supporters' => [
@@ -111,7 +112,7 @@ function entity_fields(): array
         ],
         'resources' => [
             'table' => 'resources',
-            'fields' => ['date', 'project_id', 'type', 'quantity', 'supporter_id', 'indicator_id', 'usage'],
+            'fields' => ['date', 'project_id', 'type', 'quantity', 'supporter_id', 'indicator_id', 'material_name', 'unit', 'usage'],
             'required' => ['date', 'project_id', 'type', 'quantity'],
         ],
         'indicators' => [
@@ -150,6 +151,27 @@ function organization_filter(string $alias, array $filters): array
     return empty($filters['organization']) ? [[], []] : [[$alias . '.organization = ?'], [$filters['organization']]];
 }
 
+function public_filters(array $input): array
+{
+    $filters = ['organization' => trim((string) ($input['organization'] ?? ''))];
+    foreach (['from', 'to'] as $field) {
+        $value = trim((string) ($input[$field] ?? ''));
+        if ($value === '') {
+            continue;
+        }
+        $date = DateTimeImmutable::createFromFormat('!Y-m-d', $value);
+        $errors = DateTimeImmutable::getLastErrors();
+        if (!$date || ($errors && ($errors['warning_count'] > 0 || $errors['error_count'] > 0)) || $date->format('Y-m-d') !== $value) {
+            respond(['error' => 'Informe um período válido.'], 422);
+        }
+        $filters[$field] = $value;
+    }
+    if (isset($filters['from'], $filters['to']) && $filters['from'] > $filters['to']) {
+        respond(['error' => 'A data inicial deve ser anterior à data final.'], 422);
+    }
+    return $filters;
+}
+
 function entity_rows(PDO $pdo, string $entity, array $filters = []): array
 {
     $supporterColumns = current_user()['role'] === 'admin'
@@ -179,6 +201,7 @@ function entity_rows(PDO $pdo, string $entity, array $filters = []): array
     $whereSql = $where ? ' WHERE ' . implode(' AND ', $where) : '';
     $queries = [
         'projects' => "SELECT p.id, p.name, p.organization,
+            p.accepted_resources,
             (SELECT COUNT(*) FROM indicators i WHERE i.project_id = p.id{$projectIndicatorWhere}) AS indicators,
             (SELECT COALESCE(SUM(r.quantity), 0) FROM resources r WHERE r.project_id = p.id AND r.type = 'Dinheiro'{$projectResourceWhere}) AS received
             FROM projects p{$whereSql} ORDER BY p.name",
@@ -186,8 +209,8 @@ function entity_rows(PDO $pdo, string $entity, array $filters = []): array
             s.public_token, COALESCE(SUM(r.quantity), 0) AS total
             FROM supporters s LEFT JOIN resources r ON r.supporter_id = s.id AND r.type = 'Dinheiro'
             GROUP BY s.id ORDER BY s.name",
-        'resources' => "SELECT r.id, r.date, r.project_id, p.name AS project, r.type, r.quantity,
-            r.indicator_id, i.name AS indicator, {$supporterColumns}, r.`usage` AS `usage`
+        'resources' => "SELECT r.id, r.date, r.project_id, p.name AS project, p.organization, r.type, r.quantity,
+            r.material_name, r.unit, r.indicator_id, i.name AS indicator, {$supporterColumns}, r.`usage` AS `usage`
             FROM resources r LEFT JOIN projects p ON p.id = r.project_id
             LEFT JOIN supporters s ON s.id = r.supporter_id
             LEFT JOIN indicators i ON i.id = r.indicator_id{$whereSql} ORDER BY r.date DESC, r.id DESC",
@@ -216,7 +239,17 @@ function entity_rows(PDO $pdo, string $entity, array $filters = []): array
     $statement->execute($entity === 'projects'
         ? [...$projectIndicatorValues, ...$projectResourceValues, ...$values]
         : ($entity === 'indicators' ? [...$linkedResourceValues, ...$values] : $values));
-    return $statement->fetchAll();
+    $rows = $statement->fetchAll();
+    if ($entity === 'projects') {
+        foreach ($rows as &$row) {
+            $acceptedResources = json_decode((string) ($row['accepted_resources'] ?? ''), true);
+            $row['accepted_resources'] = is_array($acceptedResources)
+                ? array_values(array_intersect($acceptedResources, ['Dinheiro', 'Material', 'Voluntariado']))
+                : ['Dinheiro', 'Material', 'Voluntariado'];
+        }
+        unset($row);
+    }
+    return $rows;
 }
 
 function dashboard_data(PDO $pdo, array $filters = []): array
@@ -239,6 +272,8 @@ function dashboard_data(PDO $pdo, array $filters = []): array
 
     $moneyQuery = $pdo->prepare("SELECT COALESCE(SUM(r.quantity), 0) FROM resources r LEFT JOIN projects p ON p.id = r.project_id WHERE r.type = 'Dinheiro'{$resourceWhereSql}");
     $moneyQuery->execute([...$resourceValues, ...$resourceOrganizationValues]);
+    $materialQuery = $pdo->prepare("SELECT p.name AS project, p.organization, COALESCE(NULLIF(r.material_name, ''), 'Material sem descrição') AS material_name, COALESCE(NULLIF(r.unit, ''), 'Unidade não informada') AS unit, SUM(r.quantity) AS quantity FROM resources r JOIN projects p ON p.id = r.project_id WHERE r.type = 'Material'{$resourceWhereSql} GROUP BY p.id, p.name, p.organization, COALESCE(NULLIF(r.material_name, ''), 'Material sem descrição'), COALESCE(NULLIF(r.unit, ''), 'Unidade não informada') ORDER BY p.organization, p.name, r.material_name, r.unit");
+    $materialQuery->execute([...$resourceValues, ...$resourceOrganizationValues]);
     $volunteerQuery = $pdo->prepare("SELECT COALESCE(SUM(r.quantity), 0) FROM resources r LEFT JOIN projects p ON p.id = r.project_id WHERE r.type = 'Voluntariado'{$resourceWhereSql}");
     $volunteerQuery->execute([...$resourceValues, ...$resourceOrganizationValues]);
     [$servedDates, $servedValues] = date_filters('ps', $filters);
@@ -258,10 +293,53 @@ function dashboard_data(PDO $pdo, array $filters = []): array
     $evidenceQuery->execute([...$evidenceValues, ...$evidenceOrganizationValues]);
     return [
         'money' => (float) $moneyQuery->fetchColumn(),
+        'materials' => $materialQuery->fetchAll(),
         'volunteer' => (float) $volunteerQuery->fetchColumn(),
         'people' => (int) $servedQuery->fetchColumn() + (int) $legacyPeopleQuery->fetchColumn() + (int) $goalPeopleQuery->fetchColumn(),
         'completedGoals' => (int) ($goals[1] ?? 0),
         'totalGoals' => (int) ($goals[0] ?? 0),
         'evidences' => (int) $evidenceQuery->fetchColumn(),
     ];
+}
+
+function supporter_rankings(PDO $pdo, ?int $currentSupporterId = null): array
+{
+    $rankings = [];
+    foreach (['money' => 'Dinheiro', 'volunteer' => 'Voluntariado'] as $key => $type) {
+        $statement = $pdo->prepare('SELECT s.id, s.name, s.public_name_allowed, SUM(r.quantity) AS total
+            FROM resources r JOIN supporters s ON s.id = r.supporter_id
+            WHERE r.type = ?
+            GROUP BY s.id, s.name, s.public_name_allowed
+            HAVING SUM(r.quantity) > 0
+            ORDER BY total DESC, s.id ASC');
+        $statement->execute([$type]);
+        $supporters = $statement->fetchAll();
+        $top = [];
+        $currentPosition = null;
+        $currentTotal = 0.0;
+        foreach ($supporters as $index => $supporter) {
+            if ($currentSupporterId !== null && (int) $supporter['id'] === $currentSupporterId) {
+                $currentPosition = $index + 1;
+                $currentTotal = (float) $supporter['total'];
+            }
+            if ($index < 10) {
+                $top[] = [
+                    'position' => $index + 1,
+                    'supporter' => (bool) $supporter['public_name_allowed'] ? $supporter['name'] : 'Apoiador anônimo',
+                    'total' => (float) $supporter['total'],
+                ];
+            }
+        }
+        $amountToReach = null;
+        if ($currentSupporterId !== null && ($currentPosition === null || $currentPosition > 10)) {
+            $targetTotal = count($supporters) >= 10 ? (float) $supporters[9]['total'] : 0.0;
+            $amountToReach = round(max(0, $targetTotal - $currentTotal + 0.01), 2);
+        }
+        $rankings[$key] = [
+            'top' => $top,
+            'position' => $currentPosition !== null && $currentPosition <= 10 ? $currentPosition : null,
+            'amountToReach' => $amountToReach,
+        ];
+    }
+    return $rankings;
 }

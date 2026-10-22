@@ -24,7 +24,8 @@ if ($pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'mysql') {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL,
         type TEXT NOT NULL,
-        public_token TEXT UNIQUE
+        public_token TEXT UNIQUE,
+        public_name_allowed INTEGER NOT NULL DEFAULT 0
     )');
     $pdo->exec('CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -32,6 +33,7 @@ if ($pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'mysql') {
         password_hash TEXT NOT NULL,
         role TEXT NOT NULL DEFAULT \'admin\',
         display_name TEXT,
+        avatar_url TEXT,
         organization TEXT,
         preferences TEXT NOT NULL DEFAULT \'{}\',
         supporter_id INTEGER UNIQUE REFERENCES supporters(id) ON DELETE CASCADE,
@@ -51,7 +53,8 @@ if ($pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'mysql') {
     $pdo->exec('CREATE TABLE IF NOT EXISTS projects (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL,
-        organization TEXT NOT NULL
+        organization TEXT NOT NULL,
+        accepted_resources TEXT
     )');
     $pdo->exec('CREATE TABLE IF NOT EXISTS resources (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -61,6 +64,8 @@ if ($pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'mysql') {
         quantity REAL NOT NULL,
         supporter_id INTEGER REFERENCES supporters(id) ON DELETE SET NULL,
         indicator_id INTEGER REFERENCES indicators(id) ON DELETE SET NULL,
+        material_name TEXT,
+        unit TEXT,
         usage TEXT NOT NULL DEFAULT \'\'
     )');
     $pdo->exec('CREATE TABLE IF NOT EXISTS indicators (
@@ -96,6 +101,8 @@ if ($pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'mysql') {
         indicator_id INTEGER REFERENCES indicators(id) ON DELETE SET NULL,
         type TEXT NOT NULL,
         quantity REAL NOT NULL,
+        material_name TEXT,
+        unit TEXT,
         description TEXT NOT NULL DEFAULT \'\',
         evidence_url TEXT NOT NULL,
         status TEXT NOT NULL DEFAULT \'pending\',
@@ -118,6 +125,31 @@ if ($pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'mysql') {
     if (!in_array('public_token', $supporterColumns, true)) {
         $pdo->exec('ALTER TABLE supporters ADD COLUMN public_token TEXT');
         $pdo->exec('CREATE UNIQUE INDEX IF NOT EXISTS supporters_public_token ON supporters(public_token)');
+    }
+    if (!in_array('public_name_allowed', $supporterColumns, true)) {
+        $pdo->exec('ALTER TABLE supporters ADD COLUMN public_name_allowed INTEGER NOT NULL DEFAULT 0');
+    }
+    $userColumns = $pdo->query('PRAGMA table_info(users)')->fetchAll(PDO::FETCH_COLUMN, 1);
+    if (!in_array('avatar_url', $userColumns, true)) {
+        $pdo->exec('ALTER TABLE users ADD COLUMN avatar_url TEXT');
+    }
+    $projectColumns = $pdo->query('PRAGMA table_info(projects)')->fetchAll(PDO::FETCH_COLUMN, 1);
+    if (!in_array('accepted_resources', $projectColumns, true)) {
+        $pdo->exec('ALTER TABLE projects ADD COLUMN accepted_resources TEXT');
+    }
+    $pdo->exec("UPDATE projects SET accepted_resources = '[\"Dinheiro\",\"Material\",\"Voluntariado\"]' WHERE accepted_resources IS NULL OR accepted_resources = ''");
+    $resourceColumns = $pdo->query('PRAGMA table_info(resources)')->fetchAll(PDO::FETCH_COLUMN, 1);
+    if (!in_array('material_name', $resourceColumns, true)) {
+        $pdo->exec('ALTER TABLE resources ADD COLUMN material_name TEXT');
+    }
+    if (!in_array('unit', $resourceColumns, true)) {
+        $pdo->exec('ALTER TABLE resources ADD COLUMN unit TEXT');
+    }
+    if (!in_array('material_name', $supportRequestColumns, true)) {
+        $pdo->exec('ALTER TABLE support_requests ADD COLUMN material_name TEXT');
+    }
+    if (!in_array('unit', $supportRequestColumns, true)) {
+        $pdo->exec('ALTER TABLE support_requests ADD COLUMN unit TEXT');
     }
     $userColumns = $pdo->query('PRAGMA table_info(users)')->fetchAll(PDO::FETCH_COLUMN, 1);
     if (!in_array('role', $userColumns, true)) {
@@ -158,11 +190,13 @@ if ($pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'mysql') {
 
 if ($pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'mysql') {
     $columns = [
-        'users' => ['role' => "VARCHAR(20) NOT NULL DEFAULT 'admin'", 'display_name' => 'VARCHAR(200) NULL', 'organization' => 'VARCHAR(200) NULL', 'supporter_id' => 'BIGINT UNSIGNED NULL UNIQUE', 'preferences' => 'TEXT NULL'],
-        'supporters' => ['public_token' => 'CHAR(32) NULL'],
+        'users' => ['role' => "VARCHAR(20) NOT NULL DEFAULT 'admin'", 'display_name' => 'VARCHAR(200) NULL', 'avatar_url' => 'VARCHAR(255) NULL', 'organization' => 'VARCHAR(200) NULL', 'supporter_id' => 'BIGINT UNSIGNED NULL UNIQUE', 'preferences' => 'TEXT NULL'],
+        'supporters' => ['public_token' => 'CHAR(32) NULL', 'public_name_allowed' => 'TINYINT(1) NOT NULL DEFAULT 0'],
+        'projects' => ['accepted_resources' => 'TEXT NULL'],
         'evidences' => ['date' => 'DATE NULL'],
         'indicators' => ['date' => 'DATE NULL', 'people_when_met' => 'INT UNSIGNED NOT NULL DEFAULT 0'],
-        'resources' => ['indicator_id' => 'BIGINT UNSIGNED NULL'],
+        'resources' => ['indicator_id' => 'BIGINT UNSIGNED NULL', 'material_name' => 'VARCHAR(200) NULL', 'unit' => 'VARCHAR(20) NULL'],
+        'support_requests' => ['material_name' => 'VARCHAR(200) NULL', 'unit' => 'VARCHAR(20) NULL'],
     ];
     foreach ($columns as $table => $tableColumns) {
         foreach ($tableColumns as $column => $definition) {
@@ -175,6 +209,7 @@ if ($pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'mysql') {
     }
     $pdo->exec("UPDATE users SET display_name = COALESCE(NULLIF(display_name, ''), SUBSTRING_INDEX(email, '@', 1))");
     $pdo->exec("UPDATE users SET preferences = '{}' WHERE preferences IS NULL");
+    $pdo->exec("UPDATE projects SET accepted_resources = '[\"Dinheiro\",\"Material\",\"Voluntariado\"]' WHERE accepted_resources IS NULL OR accepted_resources = ''");
     $indicatorIndex = $pdo->query("SELECT COUNT(*) FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'resources' AND INDEX_NAME = 'idx_resources_indicator'");
     if ((int) $indicatorIndex->fetchColumn() === 0) {
         $pdo->exec('CREATE INDEX idx_resources_indicator ON resources(indicator_id)');

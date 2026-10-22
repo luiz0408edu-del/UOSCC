@@ -17,6 +17,14 @@
                 </div>
             </div>
 
+            <form id="dashboard-filters" class="report-filters">
+                <label id="dashboard-organization-filter">OSC
+                    <select name="organization"><option value="">Todas as OSCs</option></select>
+                </label>
+                <label>De<input type="date" name="from"></label>
+                <label>Até<input type="date" name="to"></label>
+                <button type="submit" class="btn">Aplicar filtros</button>
+            </form>
             <div class="card-grid" id="dashboard-cards">
                 <div class="card" data-dashboard-card="dinheiro">
                     <h3>Dinheiro recebido</h3>
@@ -39,6 +47,7 @@
                     <div class="value" id="card-evidencias">0</div>
                 </div>
             </div>
+            <div id="dashboard-materials"></div>
         </div>
     </div>
     <script src="../js/layout.js"></script>
