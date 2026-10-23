@@ -131,9 +131,10 @@ const configs = {
         fields: [
             { name: 'name', label: 'Nome', required: true },
             { name: 'type', label: 'Tipo', type: 'select', options: ['Empresa', 'Pessoa', 'Poder público'], required: true },
+            { name: 'public_name_allowed', label: 'Permitir exibição do nome e perfil público', type: 'checkbox' },
         ],
-        headers: ['Ações', 'Nome', 'Tipo', 'Total apoiado', 'Consulta pública'],
-        row: (item) => [actions(item), escapeHTML(item.name), escapeHTML(item.type), money(item.total), `<a href="publico.html?token=${encodeURIComponent(item.public_token)}">Abrir link</a>`],
+        headers: ['Ações', 'Nome', 'Tipo', 'Nome público', 'Total apoiado', 'Consulta pública'],
+        row: (item) => [actions(item), escapeHTML(item.name), escapeHTML(item.type), item.public_name_allowed ? 'Sim' : 'Não', money(item.total), `<a href="publico.html?token=${encodeURIComponent(item.public_token)}">Abrir link</a>`],
     },
     resources: {
         button: 'Novo recurso', body: '#tabela-recursos',
@@ -199,6 +200,10 @@ async function relatedOptions(type, projectId = null) {
 
 async function renderField(field, value, isEditing = false, projectId = null) {
     const required = field.required && !(field.type === 'file' && isEditing) ? 'required' : '';
+    if (field.type === 'checkbox') {
+        const checked = value === true || value === 1 || value === '1';
+        return `<label><input type="checkbox" name="${field.name}" ${checked ? 'checked' : ''}> ${escapeHTML(field.label)}</label>`;
+    }
     if (field.type === 'checkboxes') {
         const selected = Array.isArray(value) ? value : field.options;
         return `<fieldset><legend>${escapeHTML(field.label)}</legend>${field.options.map((option) => `<label><input type="checkbox" name="${field.name}" value="${escapeHTML(option)}" ${selected.includes(option) ? 'checked' : ''}> ${escapeHTML(option)}</label>`).join('')}</fieldset>`;
@@ -268,6 +273,7 @@ async function openEditor(entity, existing = null) {
             const formData = new FormData(event.currentTarget);
             const values = Object.fromEntries(formData);
             if (entity === 'projects') values.accepted_resources = formData.getAll('accepted_resources');
+            if (entity === 'supporters') values.public_name_allowed = dialog.querySelector('[name="public_name_allowed"]').checked;
             if (currentUser?.role === 'osc' && entity === 'projects') values.organization = currentUser.organization;
             if (entity === 'evidences') {
                 const file = dialog.querySelector('input[name="file"]').files[0];
@@ -418,6 +424,19 @@ function reportTable(title, headings, rows) {
     return `<section class="report-section"><h2>${escapeHTML(title)}</h2><table><thead><tr>${headings.map((heading) => `<th>${escapeHTML(heading)}</th>`).join('')}</tr></thead><tbody>${rows.length ? rows.map((row) => `<tr>${row.map((cell) => `<td>${escapeHTML(cell)}</td>`).join('')}</tr>`).join('') : `<tr><td colspan="${headings.length}" class="empty-state">Nenhum registro.</td></tr>`}</tbody></table></section>`;
 }
 
+function supporterRankingTable(title, rows, formatTotal) {
+    const body = rows.length
+        ? rows.map((item) => {
+            const name = escapeHTML(item.supporter);
+            const supporter = item.profileId
+                ? `<a href="publico.html?apoiador=${Number(item.profileId)}">${name}</a>`
+                : name;
+            return `<tr><td>${Number(item.position)}</td><td>${supporter}</td><td>${escapeHTML(formatTotal(item.total))}</td></tr>`;
+        }).join('')
+        : `<tr><td colspan="3" class="empty-state">Nenhum registro.</td></tr>`;
+    return `<section class="report-section"><h2>${escapeHTML(title)}</h2><table><thead><tr><th>Posição</th><th>Apoiador</th><th>Total</th></tr></thead><tbody>${body}</tbody></table></section>`;
+}
+
 async function loadReport() {
     const form = document.getElementById('report-filters');
     const noteForm = document.getElementById('report-note-form');
@@ -461,6 +480,24 @@ async function loadPublicPage() {
         accountLink.href = session.user.role === 'supporter' ? 'apoiador.html' : 'dashboard.html';
         accountLink.textContent = session.user.role === 'supporter' ? 'Meu apoio' : 'Painel geral';
     }
+    const publicProfileId = new URLSearchParams(window.location.search).get('apoiador');
+    if (publicProfileId) {
+        const profileId = Number(publicProfileId);
+        if (!Number.isSafeInteger(profileId) || profileId < 1) {
+            throw new Error('Identificador de apoiador inválido.');
+        }
+        const { profile } = await apiRequest({ entity: 'public', supporter_id: profileId });
+        const profileSection = document.getElementById('perfil-apoiador-publico');
+        profileSection.hidden = false;
+        const avatarUrl = profile.avatarUrl || '../css/avatar-placeholder.svg';
+        profileSection.innerHTML = `<section class="report-section"><div class="public-supporter-profile"><img class="public-profile-avatar" src="${escapeHTML(avatarUrl)}" alt="Foto de ${escapeHTML(profile.name)}"><h1>${escapeHTML(profile.name)}</h1></div><p>Estatísticas públicas das contribuições aprovadas.</p><div class="card-grid"><div class="card"><h3>Dinheiro doado</h3><div class="value">${money(profile.totals.money)}</div></div><div class="card"><h3>Horas voluntárias</h3><div class="value">${number(profile.totals.volunteer)} h</div></div><div class="card"><h3>Posição no ranking de dinheiro</h3><div class="value">${profile.rankings.money ? number(profile.rankings.money) : '—'}</div></div><div class="card"><h3>Posição no ranking de voluntariado</h3><div class="value">${profile.rankings.volunteer ? number(profile.rankings.volunteer) : '—'}</div></div></div></section>`
+            + reportTable('Materiais doados', ['Projeto', 'Material', 'Quantidade'], profile.totals.materials.map((item) => [item.project, item.material_name, `${number(item.quantity)} ${item.unit}`]));
+        document.getElementById('consulta-apoiador').hidden = true;
+        document.getElementById('resultado-apoiador').hidden = true;
+        document.getElementById('public-filters').hidden = true;
+        document.getElementById('conteudo-publico').hidden = true;
+        return;
+    }
     const form = document.getElementById('consulta-apoiador');
     const tokenField = form.elements.token;
     const result = document.getElementById('resultado-apoiador');
@@ -485,7 +522,7 @@ async function loadPublicPage() {
                 const safeUrl = /^(https?:\/\/|\.\.\/uploads\/evidence\/)/i.test(item.url) ? item.url : '#';
                 return `<article class="evidence-item"><h3>${escapeHTML(item.title)}</h3><span>${escapeHTML(item.date)} · ${escapeHTML(item.project)} · ${escapeHTML(item.type)}</span><p>${escapeHTML(item.description || '')}</p><a href="${escapeHTML(safeUrl)}" target="_blank" rel="noopener">Abrir evidência</a></article>`;
             }).join('') : '<p class="empty-state">Nenhuma evidência publicada.</p>'}</section>`
-            + `<section class="report-section"><h2>Maiores apoiadores · ranking geral</h2><p>Classificação acumulada de todas as contribuições. Os materiais são apresentados na transparência, mas não entram nos rankings.</p><div class="leaderboard-grid">${reportTable('Maiores doadores de dinheiro', ['Posição', 'Apoiador', 'Total'], data.rankings.money.top.map((item) => [item.position, item.supporter, money(item.total)]))}${reportTable('Maiores apoiadores voluntários', ['Posição', 'Apoiador', 'Horas'], data.rankings.volunteer.top.map((item) => [item.position, item.supporter, `${number(item.total)} h`]))}</div></section>`;
+            + `<section class="report-section"><h2>Maiores apoiadores · ranking geral</h2><p>Classificação acumulada de todas as contribuições. Os materiais são apresentados na transparência, mas não entram nos rankings.</p><div class="leaderboard-grid">${supporterRankingTable('Maiores doadores de dinheiro', data.rankings.money.top, money)}${supporterRankingTable('Maiores apoiadores voluntários', data.rankings.volunteer.top, (total) => `${number(total)} h`)}</div></section>`;
     };
     filtersForm.elements.organization.value = initialFilters.get('organization') || '';
     filtersForm.elements.from.value = initialFilters.get('from') || '';

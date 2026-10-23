@@ -107,7 +107,7 @@ function entity_fields(): array
         ],
         'supporters' => [
             'table' => 'supporters',
-            'fields' => ['name', 'type'],
+            'fields' => ['name', 'type', 'public_name_allowed'],
             'required' => ['name', 'type'],
         ],
         'resources' => [
@@ -205,7 +205,7 @@ function entity_rows(PDO $pdo, string $entity, array $filters = []): array
             (SELECT COUNT(*) FROM indicators i WHERE i.project_id = p.id{$projectIndicatorWhere}) AS indicators,
             (SELECT COALESCE(SUM(r.quantity), 0) FROM resources r WHERE r.project_id = p.id AND r.type = 'Dinheiro'{$projectResourceWhere}) AS received
             FROM projects p{$whereSql} ORDER BY p.name",
-        'supporters' => "SELECT s.id, s.name, s.type,
+        'supporters' => "SELECT s.id, s.name, s.type, s.public_name_allowed,
             s.public_token, COALESCE(SUM(r.quantity), 0) AS total
             FROM supporters s LEFT JOIN resources r ON r.supporter_id = s.id AND r.type = 'Dinheiro'
             GROUP BY s.id ORDER BY s.name",
@@ -326,6 +326,7 @@ function supporter_rankings(PDO $pdo, ?int $currentSupporterId = null): array
                 $top[] = [
                     'position' => $index + 1,
                     'supporter' => (bool) $supporter['public_name_allowed'] ? $supporter['name'] : 'Apoiador anônimo',
+                    'profileId' => (bool) $supporter['public_name_allowed'] ? (int) $supporter['id'] : null,
                     'total' => (float) $supporter['total'],
                 ];
             }
@@ -338,6 +339,7 @@ function supporter_rankings(PDO $pdo, ?int $currentSupporterId = null): array
         $rankings[$key] = [
             'top' => $top,
             'position' => $currentPosition !== null && $currentPosition <= 10 ? $currentPosition : null,
+            'overallPosition' => $currentPosition,
             'amountToReach' => $amountToReach,
         ];
     }

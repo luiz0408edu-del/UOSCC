@@ -250,6 +250,21 @@ textarea {
     object-fit: cover;
 }
 
+.public-supporter-profile {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 16px;
+}
+
+.public-profile-avatar {
+    width: 96px;
+    height: 96px;
+    border: 1px solid var(--border-color);
+    border-radius: 50%;
+    object-fit: cover;
+}
+
 .account-note {
     margin: 16px 0;
     color: var(--muted-text);

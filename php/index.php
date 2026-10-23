@@ -174,6 +174,50 @@ try {
     }
 
     if ($entity === 'public' && $method === 'GET') {
+        if (isset($_GET['supporter_id'])) {
+            $supporterId = filter_var($_GET['supporter_id'], FILTER_VALIDATE_INT);
+            if ($supporterId === false || $supporterId < 1) {
+                respond(['error' => 'Identificador de apoiador inválido.'], 422);
+            }
+            $supporterQuery = $pdo->prepare('SELECT s.id, s.name, s.public_name_allowed, u.avatar_url
+                FROM supporters s LEFT JOIN users u ON u.supporter_id = s.id WHERE s.id = ?');
+            $supporterQuery->execute([$supporterId]);
+            $supporter = $supporterQuery->fetch();
+            if (!$supporter || !(bool) $supporter['public_name_allowed']) {
+                respond(['error' => 'Este perfil não está disponível publicamente.'], 404);
+            }
+            $totalsQuery = $pdo->prepare("SELECT
+                COALESCE(SUM(CASE WHEN type = 'Dinheiro' THEN quantity ELSE 0 END), 0) AS money,
+                COALESCE(SUM(CASE WHEN type = 'Voluntariado' THEN quantity ELSE 0 END), 0) AS volunteer
+                FROM resources WHERE supporter_id = ?");
+            $totalsQuery->execute([$supporterId]);
+            $totals = $totalsQuery->fetch();
+            $materialsQuery = $pdo->prepare("SELECT p.name AS project,
+                COALESCE(NULLIF(r.material_name, ''), 'Material sem descrição') AS material_name,
+                COALESCE(NULLIF(r.unit, ''), 'Unidade não informada') AS unit,
+                SUM(r.quantity) AS quantity
+                FROM resources r JOIN projects p ON p.id = r.project_id
+                WHERE r.supporter_id = ? AND r.type = 'Material'
+                GROUP BY p.id, p.name, COALESCE(NULLIF(r.material_name, ''), 'Material sem descrição'), COALESCE(NULLIF(r.unit, ''), 'Unidade não informada')
+                ORDER BY p.name, r.material_name, r.unit");
+            $materialsQuery->execute([$supporterId]);
+            $rankings = supporter_rankings($pdo, $supporterId);
+            respond([
+                'profile' => [
+                    'name' => $supporter['name'],
+                    'avatarUrl' => $supporter['avatar_url'] ?: null,
+                    'totals' => [
+                        'money' => (float) $totals['money'],
+                        'volunteer' => (float) $totals['volunteer'],
+                        'materials' => $materialsQuery->fetchAll(),
+                    ],
+                    'rankings' => [
+                        'money' => $rankings['money']['overallPosition'],
+                        'volunteer' => $rankings['volunteer']['overallPosition'],
+                    ],
+                ],
+            ]);
+        }
         $filters = public_filters($_GET);
         [$resourceDates, $resourceValues] = date_filters('r', $filters);
         [$resourceOrganization, $resourceOrganizationValues] = organization_filter('p', $filters);
@@ -751,6 +795,12 @@ try {
                 if ($value === false) {
                     respond(['error' => "O campo {$field} precisa ser um identificador válido."], 422);
                 }
+            } elseif ($entity === 'supporters' && $field === 'public_name_allowed') {
+                $value = filter_var($value ?? false, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+                if ($value === null) {
+                    respond(['error' => 'Informe se o nome do apoiador pode ser exibido publicamente.'], 422);
+                }
+                $value = $value ? 1 : 0;
             } elseif ($field === 'people_when_met' || ($entity === 'people_served' && $field === 'quantity')) {
                 $value = $value === '' || $value === null ? null : filter_var($value, FILTER_VALIDATE_INT);
                 if ($value !== null && ($value === false || $value < 0 || ($entity === 'people_served' && $field === 'quantity' && $value < 1))) {
