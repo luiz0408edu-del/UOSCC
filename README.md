@@ -1,4 +1,5 @@
 # Painel de transparência UOSCC
+coNY9/H6oqIopgr7b4ETvZe40D06hFIi
 
 ## MySQL
 
