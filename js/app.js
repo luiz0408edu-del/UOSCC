@@ -110,7 +110,7 @@ function addAppStyles() {
         .theme-toggle { padding: 6px 12px; border: 1px solid var(--border-color); border-radius: 5px; background: var(--surface-color); color: var(--text-color); cursor: pointer; }
         .empty-state { padding: 18px; color: var(--muted-text); }
         @media (max-width: 700px) { .app-dialog { padding: 18px; } .row-actions { flex-wrap: wrap; } }
-        @media print { aside, header.topbar, .report-filters, #exportar-csv, #exportar-pdf { display: none !important; } body, .main-container, .content { display: block; height: auto; overflow: visible; padding: 0; background: white; } #relatorio-conteudo { border: 0 !important; padding: 0 !important; } table { break-inside: auto; } tr { break-inside: avoid; } }
+        @media print { aside, header.topbar, .report-filters, #resource-allocation-form, #exportar-csv, #exportar-pdf { display: none !important; } body, .main-container, .content { display: block; height: auto; overflow: visible; padding: 0; background: white; } #relatorio-conteudo { border: 0 !important; padding: 0 !important; } table { break-inside: auto; } tr { break-inside: avoid; } }
     `;
     document.head.append(style);
 }
@@ -123,8 +123,8 @@ const configs = {
             { name: 'organization', label: 'Área da OSC responsável', type: 'select', options: OSC_AREAS, required: true },
             { name: 'accepted_resources', label: 'Tipos de recurso aceitos', type: 'checkboxes', options: ['Dinheiro', 'Material', 'Voluntariado'], required: true },
         ],
-        headers: ['Ações', 'Projeto', 'OSC', 'Recursos aceitos', 'Indicadores', 'Recebido'],
-        row: (item) => [actions(item), escapeHTML(item.name), escapeHTML(item.organization), escapeHTML((item.accepted_resources || []).join(', ')), number(item.indicators), money(item.received)],
+        headers: ['Ações', 'Projeto', 'OSC', 'Recursos aceitos', 'Indicadores', 'Recebido', 'Horas de voluntariado'],
+        row: (item) => [actions(item), escapeHTML(item.name), escapeHTML(item.organization), escapeHTML((item.accepted_resources || []).join(', ')), number(item.indicators), money(item.received), `${number(item.volunteer_hours)} h`],
     },
     supporters: {
         button: 'Novo apoiador', body: '#tabela-apoiadores',
@@ -234,7 +234,8 @@ async function renderField(field, value, isEditing = false, projectId = null) {
 
 async function openEditor(entity, existing = null) {
     const config = configs[entity];
-    const fields = config.fields.filter((field) => !(currentUser?.role === 'osc' && (field.type === 'supporters' || (entity === 'projects' && ['organization', 'accepted_resources'].includes(field.name)))));
+    const fields = config.fields.filter((field) => !(currentUser?.role === 'osc' && (field.type === 'supporters' || (entity === 'projects' && ['organization', 'accepted_resources'].includes(field.name))))
+        && !(currentUser?.role === 'osc_admin' && field.name === 'organization'));
     const dialog = document.createElement('dialog');
     dialog.className = 'app-dialog';
     dialog.innerHTML = `<h2>${existing ? 'Editar' : 'Novo registro'}</h2><form>${(await Promise.all(fields.map((field) => renderField(field, existing?.[field.source || field.name], Boolean(existing), existing?.project_id)))).join('')}<p class="form-error" role="alert"></p><menu><button type="button" class="btn-secondary" data-cancel>Cancelar</button><button type="submit" class="btn">Salvar</button></menu></form>`;
@@ -274,7 +275,7 @@ async function openEditor(entity, existing = null) {
             const values = Object.fromEntries(formData);
             if (entity === 'projects') values.accepted_resources = formData.getAll('accepted_resources');
             if (entity === 'supporters') values.public_name_allowed = dialog.querySelector('[name="public_name_allowed"]').checked;
-            if (currentUser?.role === 'osc' && entity === 'projects') values.organization = currentUser.organization;
+            if (['osc', 'osc_admin'].includes(currentUser?.role) && entity === 'projects') values.organization = currentUser.organization;
             if (entity === 'evidences') {
                 const file = dialog.querySelector('input[name="file"]').files[0];
                 if (file) {
@@ -309,12 +310,23 @@ function emptyRow(colspan) {
 
 async function loadEntity(entity) {
     const config = configs[entity];
-    const items = await apiRequest({ entity });
+    let items = await apiRequest({ entity });
+    if (entity === 'evidences') {
+        const publicData = await apiRequest({ entity: 'public' });
+        const allocations = publicData.allocations.map((item) => ({
+            ...item,
+            isAllocation: true,
+            title: 'Destinação de recursos',
+            type: item.type === 'Dinheiro' ? 'Despesa financeira' : 'Alocação de material',
+            description: `${item.type === 'Dinheiro' ? money(item.quantity) : `${number(item.quantity)} ${item.unit || ''} · ${item.material_name || 'Material'}`} — ${item.description}`,
+        }));
+        items = [...items, ...allocations].sort((left, right) => right.date.localeCompare(left.date) || Number(right.id || 0) - Number(left.id || 0));
+    }
     const container = document.querySelector(config.body);
     if (config.cards) {
         container.innerHTML = items.length ? items.map((item) => {
-            const safeUrl = /^(https?:\/\/|\.\.\/uploads\/evidence\/)/i.test(item.url) ? item.url : '#';
-            return `<article class="evidence-item"><div class="row-actions">${actions(item)}</div><h3>${escapeHTML(item.title)}</h3><span>${escapeHTML(item.project || '—')} · ${escapeHTML(item.type)} · ${escapeHTML(item.date)}</span><p>${escapeHTML(item.description || '')}</p><a href="${escapeHTML(safeUrl)}" target="_blank" rel="noopener">Abrir evidência</a></article>`;
+            const safeUrl = /^(https?:\/\/|\.\.\/uploads\/evidence\/)/i.test(item.url || '') ? item.url : '#';
+            return `<article class="evidence-item">${item.isAllocation ? '' : `<div class="row-actions">${actions(item)}</div>`}<h3>${escapeHTML(item.title)}</h3><span>${escapeHTML(item.project || '—')} · ${escapeHTML(item.type)} · ${escapeHTML(item.date)}</span><p>${escapeHTML(item.description || '')}</p>${item.isAllocation ? '' : `<a href="${escapeHTML(safeUrl)}" target="_blank" rel="noopener">Abrir evidência</a>`}</article>`;
         }).join('') : '<p class="empty-state">Nenhuma evidência cadastrada.</p>';
     } else {
         container.innerHTML = items.length ? items.map((item) => `<tr>${config.row(item).map((cell) => `<td>${cell}</td>`).join('')}</tr>`).join('') : emptyRow(config.headers.length);
@@ -440,6 +452,7 @@ function supporterRankingTable(title, rows, formatTotal) {
 async function loadReport() {
     const form = document.getElementById('report-filters');
     const noteForm = document.getElementById('report-note-form');
+    const allocationForm = document.getElementById('resource-allocation-form');
     const filters = Object.fromEntries(new FormData(form));
     const organizationSelect = form.elements.organization;
     if (currentUser.role === 'admin') {
@@ -452,23 +465,62 @@ async function loadReport() {
     }
     const report = await apiRequest({ action: 'report', ...Object.fromEntries(Object.entries(filters).filter(([, value]) => value)) });
     window.currentReport = report;
-    noteForm.hidden = currentUser.role !== 'admin';
-    if (currentUser.role === 'admin') {
+    const canManageOrganization = ['admin', 'osc_admin'].includes(currentUser.role);
+    noteForm.hidden = !canManageOrganization;
+    allocationForm.hidden = !canManageOrganization;
+    if (canManageOrganization) {
         noteForm.elements.title.value = report.reportNote?.title || '';
         noteForm.elements.narrative.value = report.reportNote?.narrative || '';
     }
+    const projects = await apiRequest({ entity: 'projects' });
+    const selectedProject = allocationForm.elements.project_id.value;
+    const availableProjects = filters.organization
+        ? projects.filter((project) => project.organization === filters.organization)
+        : projects;
+    allocationForm.elements.project_id.innerHTML = '<option value="">Selecione um projeto</option>' + availableProjects.map((project) => `<option value="${Number(project.id)}">${escapeHTML(project.name)} · ${escapeHTML(project.organization)}</option>`).join('');
+    if (availableProjects.some((project) => String(project.id) === selectedProject)) allocationForm.elements.project_id.value = selectedProject;
+    const selectedType = allocationForm.elements.type.value;
+    const isMaterial = selectedType === 'Material';
+    allocationForm.elements.material_name.required = isMaterial;
+    allocationForm.elements.unit.required = isMaterial;
+    document.getElementById('allocation-material-name-field').hidden = !isMaterial;
+    document.getElementById('allocation-unit-field').hidden = !isMaterial;
     const summary = report.summary;
     const container = document.getElementById('relatorio-conteudo');
     const reportNoteHTML = report.reportNote
         ? `<section class="report-section"><h2>${escapeHTML(report.reportNote.title)}</h2><p style="white-space: pre-wrap">${escapeHTML(report.reportNote.narrative)}</p></section>`
         : '';
-    container.innerHTML = `<div class="card-grid"><div class="card"><h3>Dinheiro recebido</h3><div class="value">${money(summary.money)}</div></div><div class="card"><h3>Horas de voluntariado</h3><div class="value">${number(summary.volunteer)} h</div></div><div class="card"><h3>Pessoas atendidas</h3><div class="value">${number(summary.people)}</div></div><div class="card"><h3>Metas concluídas</h3><div class="value">${summary.completedGoals} / ${summary.totalGoals}</div></div></div>`
+    const availableMoney = report.resourceBalances.filter((item) => item.type === 'Dinheiro').reduce((total, item) => total + Number(item.balance), 0);
+    container.innerHTML = `<div class="card-grid"><div class="card"><h3>Dinheiro recebido no período</h3><div class="value">${money(summary.money)}</div></div><div class="card"><h3>Dinheiro disponível</h3><div class="value">${money(availableMoney)}</div></div><div class="card"><h3>Horas de voluntariado</h3><div class="value">${number(summary.volunteer)} h</div></div><div class="card"><h3>Pessoas atendidas</h3><div class="value">${number(summary.people)}</div></div><div class="card"><h3>Metas concluídas</h3><div class="value">${summary.completedGoals} / ${summary.totalGoals}</div></div></div>`
         + reportNoteHTML
-        + reportTable('Projetos', ['Projeto', 'OSC', 'Indicadores', 'Recebido'], report.projects.map((item) => [item.name, item.organization, number(item.indicators), money(item.received)]))
+        + reportTable('Projetos', ['Projeto', 'OSC', 'Indicadores', 'Recebido', 'Horas de voluntariado'], report.projects.map((item) => [item.name, item.organization, number(item.indicators), money(item.received), `${number(item.volunteer_hours)} h`]))
         + reportTable('Recursos', ['Data', 'Projeto', 'Tipo', 'Quantidade', 'Apoiador', 'Uso'], report.resources.map((item) => [item.date, item.project || '—', item.type, item.type === 'Dinheiro' ? money(item.quantity) : item.type === 'Material' ? `${number(item.quantity)} ${item.unit || 'Unidade não informada'} · ${item.material_name || 'Material sem descrição'}` : `${number(item.quantity)} h`, item.supporter || '—', item.usage || '—']))
         + reportTable('Indicadores', ['Data', 'Projeto', 'Indicador', 'Meta', 'Alcançado'], report.indicators.map((item) => [item.date, item.project || '—', item.name, number(item.target), number(item.achieved)]))
         + reportTable('Pessoas atendidas', ['Data', 'Projeto', 'Quantidade', 'Observação'], report.peopleServed.map((item) => [item.date, item.project, number(item.quantity), item.description || '—']))
         + reportTable('Evidências', ['Data', 'Projeto', 'Título', 'Tipo'], report.evidences.map((item) => [item.date, item.project || '—', item.title, item.type]));
+    document.getElementById('report-resource-balances').innerHTML = reportTable(
+        'Saldo por projeto e recurso',
+        ['Projeto', 'OSC', 'Recurso', 'Recebido até a data', 'Alocado até a data', 'Disponível'],
+        report.resourceBalances.map((item) => {
+            const resource = item.type === 'Dinheiro'
+                ? 'Dinheiro'
+                : `${item.material_name || 'Material'} (${item.unit || 'unidade não informada'})`;
+            const format = item.type === 'Dinheiro' ? money : (value) => `${number(value)} ${item.unit || ''}`;
+            return [item.project, item.organization, resource, format(item.received), format(item.allocated), format(item.balance)];
+        }),
+    );
+    document.getElementById('report-resource-allocations').innerHTML = reportTable(
+        'Destinações publicadas',
+        ['Data', 'Projeto', 'OSC', 'Recurso', 'Quantidade', 'Aplicação'],
+        report.allocations.map((item) => [
+            item.date,
+            item.project,
+            item.organization,
+            item.type === 'Dinheiro' ? 'Dinheiro' : `${item.material_name} (${item.unit})`,
+            item.type === 'Dinheiro' ? money(item.quantity) : `${number(item.quantity)} ${item.unit}`,
+            item.description,
+        ]),
+    );
 }
 
 async function loadPublicPage() {
@@ -514,13 +566,30 @@ async function loadPublicPage() {
         const selectedOrganization = filters.organization || '';
         filterOrganizations.innerHTML = '<option value="">Todas as OSCs</option>' + data.organizations.map((organization) => `<option value="${escapeHTML(organization)}">${escapeHTML(organization)}</option>`).join('');
         filterOrganizations.value = selectedOrganization;
-        container.innerHTML = `<div class="card-grid"><div class="card"><h3>Dinheiro recebido</h3><div class="value">${money(data.summary.money)}</div></div><div class="card"><h3>Horas de voluntariado</h3><div class="value">${number(data.summary.volunteer)} h</div></div><div class="card"><h3>Pessoas atendidas</h3><div class="value">${number(data.summary.people)}</div></div><div class="card"><h3>Evidências publicadas</h3><div class="value">${number(data.summary.evidences)}</div></div></div>`
-            + reportTable('Projetos apoiados', ['Projeto', 'OSC', 'Indicadores', 'Recebido'], data.projects.map((item) => [item.name, item.organization, number(item.indicators), money(item.received)]))
+        const availableMoney = data.resourceBalances.filter((item) => item.type === 'Dinheiro').reduce((total, item) => total + Number(item.balance), 0);
+        const publishedItems = [
+            ...data.evidences,
+            ...data.allocations.map((item) => ({
+                ...item,
+                isAllocation: true,
+                title: 'Destinação de recursos',
+                type: item.type === 'Dinheiro' ? 'Despesa financeira' : 'Alocação de material',
+                description: `${item.type === 'Dinheiro' ? money(item.quantity) : `${number(item.quantity)} ${item.unit} · ${item.material_name}`} — ${item.description}`,
+            })),
+        ].sort((left, right) => right.date.localeCompare(left.date));
+        container.innerHTML = `<div class="card-grid"><div class="card"><h3>Dinheiro recebido no período</h3><div class="value">${money(data.summary.money)}</div></div><div class="card"><h3>Dinheiro disponível</h3><div class="value">${money(availableMoney)}</div></div><div class="card"><h3>Horas de voluntariado</h3><div class="value">${number(data.summary.volunteer)} h</div></div><div class="card"><h3>Pessoas atendidas</h3><div class="value">${number(data.summary.people)}</div></div><div class="card"><h3>Evidências publicadas</h3><div class="value">${number(data.summary.evidences + data.allocations.length)}</div></div></div>`
+            + reportTable('Projetos apoiados', ['Projeto', 'OSC', 'Indicadores', 'Dinheiro recebido', 'Horas de voluntariado'], data.projects.map((item) => [item.name, item.organization, number(item.indicators), money(item.received), `${number(item.volunteer_hours)} h`]))
             + reportTable('Materiais recebidos', ['Projeto', 'OSC', 'Material', 'Quantidade'], (data.summary.materials || []).map((item) => [item.project, item.organization, item.material_name, `${number(item.quantity)} ${item.unit}`]))
-            + reportTable('Destinação dos recursos', ['Data', 'Projeto', 'OSC', 'Tipo', 'Quantidade', 'Apoiador', 'Uso'], data.resources.map((item) => [item.date, item.project || '—', item.organization, item.type, item.type === 'Dinheiro' ? money(item.quantity) : item.type === 'Material' ? `${number(item.quantity)} ${item.unit || 'Unidade não informada'} · ${item.material_name || 'Material sem descrição'}` : `${number(item.quantity)} h`, item.supporter, item.usage || '—']))
-            + `<section class="report-section"><h2>Evidências publicadas</h2>${data.evidences.length ? data.evidences.map((item) => {
+            + reportTable('Saldo disponível de recursos', ['Projeto', 'OSC', 'Recurso', 'Recebido', 'Alocado', 'Disponível'], data.resourceBalances.map((item) => {
+                const label = item.type === 'Dinheiro' ? 'Dinheiro' : `${item.material_name || 'Material'} (${item.unit || 'unidade não informada'})`;
+                const format = item.type === 'Dinheiro' ? money : (value) => `${number(value)} ${item.unit || ''}`;
+                return [item.project, item.organization, label, format(item.received), format(item.allocated), format(item.balance)];
+            }))
+            + reportTable('Destinação dos recursos', ['Data', 'Projeto', 'OSC', 'Recurso', 'Quantidade', 'Onde foi aplicado'], data.allocations.map((item) => [item.date, item.project, item.organization, item.type === 'Dinheiro' ? 'Dinheiro' : `${item.material_name} (${item.unit})`, item.type === 'Dinheiro' ? money(item.quantity) : `${number(item.quantity)} ${item.unit}`, item.description]))
+            + reportTable('Recursos recebidos', ['Data', 'Projeto', 'OSC', 'Tipo', 'Quantidade', 'Apoiador', 'Uso'], data.resources.map((item) => [item.date, item.project || '—', item.organization, item.type, item.type === 'Dinheiro' ? money(item.quantity) : item.type === 'Material' ? `${number(item.quantity)} ${item.unit || 'Unidade não informada'} · ${item.material_name || 'Material sem descrição'}` : `${number(item.quantity)} h`, item.supporter, item.usage || '—']))
+            + `<section class="report-section"><h2>Evidências publicadas</h2>${publishedItems.length ? publishedItems.map((item) => {
                 const safeUrl = /^(https?:\/\/|\.\.\/uploads\/evidence\/)/i.test(item.url) ? item.url : '#';
-                return `<article class="evidence-item"><h3>${escapeHTML(item.title)}</h3><span>${escapeHTML(item.date)} · ${escapeHTML(item.project)} · ${escapeHTML(item.type)}</span><p>${escapeHTML(item.description || '')}</p><a href="${escapeHTML(safeUrl)}" target="_blank" rel="noopener">Abrir evidência</a></article>`;
+                return `<article class="evidence-item"><h3>${escapeHTML(item.title)}</h3><span>${escapeHTML(item.date)} · ${escapeHTML(item.project)} · ${escapeHTML(item.type)}</span><p>${escapeHTML(item.description || '')}</p>${item.isAllocation ? '' : `<a href="${escapeHTML(safeUrl)}" target="_blank" rel="noopener">Abrir evidência</a>`}</article>`;
             }).join('') : '<p class="empty-state">Nenhuma evidência publicada.</p>'}</section>`
             + `<section class="report-section"><h2>Maiores apoiadores · ranking geral</h2><p>Classificação acumulada de todas as contribuições. Os materiais são apresentados na transparência, mas não entram nos rankings.</p><div class="leaderboard-grid">${supporterRankingTable('Maiores doadores de dinheiro', data.rankings.money.top, money)}${supporterRankingTable('Maiores apoiadores voluntários', data.rankings.volunteer.top, (total) => `${number(total)} h`)}</div></section>`;
     };
@@ -685,7 +754,7 @@ function setRoleNavigation(user) {
 
 function roleNavigationPermissions(role) {
     if (role === 'admin') return ['dashboard', 'projetos', 'apoiadores', 'financeiro', 'metas', 'evidencias', 'relatorios', 'publico', 'contas', 'conta', 'configuracoes'];
-    if (role === 'osc') return ['dashboard', 'projetos', 'financeiro', 'metas', 'evidencias', 'relatorios', 'publico', 'conta', 'configuracoes'];
+    if (role === 'osc' || role === 'osc_admin') return ['dashboard', 'projetos', 'financeiro', 'metas', 'evidencias', 'relatorios', 'publico', 'conta', 'configuracoes'];
     return ['apoiador', 'publico', 'conta', 'configuracoes'];
 }
 
@@ -958,6 +1027,7 @@ function bindAccountManagement() {
 function bindOSCAccountForm() {
     for (const [formId, action, success] of [
         ['form-conta-osc', 'create-osc-account', 'Acesso da OSC criado.'],
+        ['form-conta-osc-admin', 'create-osc-admin-account', 'Acesso de administrador local criado.'],
         ['form-conta-admin', 'create-admin-account', 'Acesso de administrador criado.'],
     ]) {
         const form = document.getElementById(formId);
@@ -977,6 +1047,43 @@ function bindOSCAccountForm() {
             }
         });
     }
+    loadOSCAccounts().catch((error) => notify(error.message));
+}
+
+async function loadOSCAccounts() {
+    const container = document.getElementById('osc-accounts-list');
+    const accounts = await apiRequest({ action: 'osc-accounts' });
+    container.innerHTML = accounts.length
+        ? `<table><thead><tr><th>E-mail</th><th>OSC</th><th>Perfil</th><th>Ações</th></tr></thead><tbody>${accounts.map((account) => `<tr><td>${escapeHTML(account.email)}</td><td>${escapeHTML(account.organization || '—')}</td><td>${escapeHTML(account.roleLabel)}</td><td><button type="button" class="btn" data-reset-osc-password="${Number(account.id)}" data-account-email="${escapeHTML(account.email)}">Redefinir senha</button></td></tr>`).join('')}</tbody></table>`
+        : '<p class="empty-state">Nenhuma conta OSC cadastrada.</p>';
+    container.addEventListener('click', async (event) => {
+        const button = event.target.closest('[data-reset-osc-password]');
+        if (!button) return;
+        const dialog = document.createElement('dialog');
+        dialog.className = 'app-dialog';
+        dialog.innerHTML = `<h2>Redefinir senha</h2><form><p>Defina uma nova senha para ${escapeHTML(button.dataset.accountEmail)}.</p><label>Nova senha (mínimo 12 caracteres)<input name="password" type="password" minlength="12" autocomplete="new-password" required></label><p class="form-error" role="alert"></p><menu><button type="button" class="btn-secondary" data-cancel>Cancelar</button><button type="submit" class="btn">Salvar nova senha</button></menu></form>`;
+        document.body.append(dialog);
+        dialog.showModal();
+        dialog.querySelector('[data-cancel]').addEventListener('click', () => dialog.close());
+        dialog.addEventListener('close', () => dialog.remove(), { once: true });
+        dialog.querySelector('form').addEventListener('submit', async (submitEvent) => {
+            submitEvent.preventDefault();
+            const submitButton = dialog.querySelector('[type="submit"]');
+            submitButton.disabled = true;
+            try {
+                const password = new FormData(submitEvent.currentTarget).get('password');
+                await apiRequest({ action: 'reset-osc-password' }, {
+                    method: 'POST',
+                    body: JSON.stringify({ id: Number(button.dataset.resetOscPassword), password }),
+                });
+                dialog.close();
+                notify('Senha redefinida. Compartilhe a nova senha com a pessoa por um canal seguro.');
+            } catch (error) {
+                dialog.querySelector('[role="alert"]').textContent = error.message;
+                submitButton.disabled = false;
+            }
+        });
+    });
 }
 
 function exportReportCsv() {
@@ -988,6 +1095,16 @@ function exportReportCsv() {
     report.indicators.forEach((item) => rows.push(['Indicador', item.date, item.project, item.name, '', item.target, item.achieved, '']));
     report.peopleServed.forEach((item) => rows.push(['Atendimento', item.date, item.project, item.description, 'Pessoas', '', item.quantity, '']));
     report.evidences.forEach((item) => rows.push(['Evidência', item.date, item.project, item.title, item.type, '', '', item.description]));
+    report.allocations.forEach((item) => rows.push([
+        'Destinação',
+        item.date,
+        item.project,
+        item.type === 'Dinheiro' ? item.description : `${item.material_name} (${item.unit}) · ${item.description}`,
+        item.type,
+        '',
+        item.type === 'Dinheiro' ? money(item.quantity) : item.quantity,
+        item.description,
+    ]));
     const csv = rows.map((row) => row.map((cell) => {
         let value = String(cell ?? '');
         if (/^[\s]*[=+\-@]/.test(value)) value = `'${value}`;
@@ -1067,7 +1184,7 @@ async function initialize() {
             return;
         }
         const oscPages = ['dashboard.html', 'financeiro.html', 'metas.html', 'evidencias.html', 'projetos.html', 'relatorios.html', 'conta.html', 'configuracoes.html'];
-        if (currentUser.role === 'osc' && !oscPages.includes(page)) {
+        if (['osc', 'osc_admin'].includes(currentUser.role) && !oscPages.includes(page)) {
             window.location.href = 'dashboard.html';
             return;
         }
@@ -1092,6 +1209,39 @@ async function initialize() {
     if (page === 'relatorios.html') {
         bindEntity('people_served');
         await loadEntity('people_served');
+        const allocationForm = document.getElementById('resource-allocation-form');
+        const updateAllocationFields = () => {
+            const isMaterial = allocationForm.elements.type.value === 'Material';
+            document.getElementById('allocation-material-name-field').hidden = !isMaterial;
+            document.getElementById('allocation-unit-field').hidden = !isMaterial;
+            allocationForm.elements.material_name.required = isMaterial;
+            allocationForm.elements.unit.required = isMaterial;
+            allocationForm.elements.quantity.step = isMaterial ? 'any' : '0.01';
+        };
+        allocationForm.elements.type.addEventListener('change', updateAllocationFields);
+        updateAllocationFields();
+        allocationForm.addEventListener('submit', async (event) => {
+            event.preventDefault();
+            const button = allocationForm.querySelector('[type="submit"]');
+            const status = allocationForm.querySelector('[role="status"]');
+            button.disabled = true;
+            status.textContent = '';
+            try {
+                const values = Object.fromEntries(new FormData(allocationForm));
+                await apiRequest({ action: 'allocate-resource' }, {
+                    method: 'POST',
+                    body: JSON.stringify(values),
+                });
+                allocationForm.reset();
+                updateAllocationFields();
+                await loadReport();
+                allocationForm.querySelector('[role="status"]').textContent = 'Destinação registrada e publicada na transparência.';
+            } catch (error) {
+                status.textContent = error.message;
+            } finally {
+                button.disabled = false;
+            }
+        });
         document.getElementById('report-filters').addEventListener('submit', (event) => {
             event.preventDefault();
             loadReport().catch((error) => notify(error.message));

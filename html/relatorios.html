@@ -35,6 +35,61 @@
             <section class="report-section">
                 <div class="page-header">
                     <div>
+                        <h2>Destinação de recursos</h2>
+                        <p>Registre onde o dinheiro e os materiais recebidos foram utilizados. As destinações são públicas e descontadas do saldo do projeto.</p>
+                    </div>
+                </div>
+                <form id="resource-allocation-form" class="report-note-form">
+                    <label>Projeto
+                        <select name="project_id" required><option value="">Selecione um projeto</option></select>
+                    </label>
+                    <label>Data da destinação
+                        <input name="date" type="date" required>
+                    </label>
+                    <label>Recurso
+                        <select name="type" required>
+                            <option value="Dinheiro">Dinheiro</option>
+                            <option value="Material">Material</option>
+                        </select>
+                    </label>
+                    <label>Valor ou quantidade
+                        <input name="quantity" type="number" min="0.01" step="0.01" required>
+                    </label>
+                    <label id="allocation-material-name-field" hidden>Material
+                        <input name="material_name" type="text" maxlength="200">
+                    </label>
+                    <label id="allocation-unit-field" hidden>Unidade
+                        <select name="unit">
+                            <option value="">Selecione</option>
+                            <option value="kg">kg</option>
+                            <option value="g">g</option>
+                            <option value="litro">litro</option>
+                            <option value="ml">ml</option>
+                            <option value="unidade">unidade</option>
+                            <option value="peça">peça</option>
+                            <option value="caixa">caixa</option>
+                            <option value="pacote">pacote</option>
+                        </select>
+                    </label>
+                    <label>Onde foi aplicado
+                        <textarea name="description" maxlength="2000" rows="3" required></textarea>
+                    </label>
+                    <p role="status" aria-live="polite"></p>
+                    <button type="submit" class="btn">Registrar e publicar destinação</button>
+                </form>
+            </section>
+            <section class="report-section">
+                <h2>Saldo de recursos até o fim do período</h2>
+                <p>O saldo considera todos os recebimentos e destinações do projeto até a data final selecionada.</p>
+                <div id="report-resource-balances"></div>
+            </section>
+            <section class="report-section">
+                <h2>Destinações registradas no período</h2>
+                <div id="report-resource-allocations"></div>
+            </section>
+            <section class="report-section">
+                <div class="page-header">
+                    <div>
                         <h2>Registro de pessoas atendidas</h2>
                         <p>Inclua ou remova quantidades por projeto e data, sem cadastrar dados pessoais.</p>
                     </div>

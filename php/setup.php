@@ -68,6 +68,18 @@ if ($pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'mysql') {
         unit TEXT,
         usage TEXT NOT NULL DEFAULT \'\'
     )');
+    $pdo->exec('CREATE TABLE IF NOT EXISTS resource_allocations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        date TEXT NOT NULL,
+        type TEXT NOT NULL,
+        quantity REAL NOT NULL CHECK (quantity > 0),
+        material_name TEXT,
+        unit TEXT,
+        description TEXT NOT NULL,
+        created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )');
     $pdo->exec('CREATE TABLE IF NOT EXISTS indicators (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,

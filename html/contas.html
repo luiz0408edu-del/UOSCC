@@ -11,8 +11,8 @@
         <div class="content">
             <div class="page-header">
                 <div>
-                    <h1>Criar acesso de OSC</h1>
-                    <p>Vincule uma conta à área de atuação correspondente.</p>
+                    <h1>Acessos das OSCs</h1>
+                    <p>Crie e acompanhe várias contas vinculadas à mesma área de atuação.</p>
                 </div>
             </div>
             <form id="form-conta-osc" class="account-form">
@@ -36,6 +36,36 @@
                 <p role="alert"></p>
                 <button type="submit" class="btn">Criar conta</button>
             </form>
+            <section class="report-section">
+                <h2>Criar administrador local da OSC</h2>
+                <p>Este perfil administra projetos, recursos e relatórios apenas da área selecionada. Não pode acessar ou alterar dados de outras OSCs nem gerenciar apoiadores.</p>
+                <form id="form-conta-osc-admin" class="account-form">
+                    <label>Área de atuação
+                        <select name="organization" required>
+                            <option value="">Selecione uma área</option>
+                            <option>Educação e formação cidadã</option>
+                            <option>Meio ambiente e sustentabilidade</option>
+                            <option>Saúde e bem-estar comunitário</option>
+                            <option>Assistência social e apoio às famílias</option>
+                            <option>Direitos humanos e inclusão social</option>
+                            <option>Cultura, esporte e lazer</option>
+                        </select>
+                    </label>
+                    <label>E-mail de acesso
+                        <input name="email" type="email" autocomplete="email" required>
+                    </label>
+                    <label>Senha inicial (mínimo 12 caracteres)
+                        <input name="password" type="password" minlength="12" autocomplete="new-password" required>
+                    </label>
+                    <p role="alert"></p>
+                    <button type="submit" class="btn">Criar administrador local</button>
+                </form>
+            </section>
+            <section class="report-section">
+                <h2>Contas OSC cadastradas</h2>
+                <p>Por segurança, as senhas existentes não são exibidas. Use “Redefinir senha” para definir uma nova senha para uma conta.</p>
+                <div id="osc-accounts-list"></div>
+            </section>
             <section class="report-section">
                 <h2>Criar acesso de administrador UOSCC</h2>
                 <form id="form-conta-admin" class="account-form">

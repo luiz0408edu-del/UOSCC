@@ -3,7 +3,7 @@
 -- https://www.phpmyadmin.net/
 --
 -- Host: 127.0.0.1
--- Tempo de geração: 26/10/2026 às 18:37
+-- Tempo de geração: 29/10/2026 às 19:31
 -- Versão do servidor: 10.4.32-MariaDB
 -- Versão do PHP: 8.2.12
 
@@ -65,7 +65,8 @@ CREATE TABLE `indicators` (
 --
 
 INSERT INTO `indicators` (`id`, `project_id`, `name`, `date`, `target`, `achieved`, `people_when_met`) VALUES
-(3, 11, 'Indicador teste', '2026-10-23', 1000.00, 0.00, 1000);
+(3, 11, 'Indicador teste', '2026-10-23', 1000.00, 0.00, 1000),
+(4, 11, 'comida', '2007-10-25', 100.00, 0.00, 1000);
 
 -- --------------------------------------------------------
 
@@ -100,7 +101,8 @@ CREATE TABLE `projects` (
 --
 
 INSERT INTO `projects` (`id`, `name`, `organization`, `accepted_resources`) VALUES
-(11, 'Projeto teste', 'Educação e formação cidadã', '[\"Dinheiro\",\"Material\",\"Voluntariado\"]');
+(11, 'Projeto teste', 'Educação e formação cidadã', '[\"Dinheiro\",\"Material\",\"Voluntariado\"]'),
+(12, 'projeto cax dode', 'Meio ambiente e sustentabilidade', NULL);
 
 -- --------------------------------------------------------
 
@@ -143,9 +145,36 @@ CREATE TABLE `resources` (
 --
 
 INSERT INTO `resources` (`id`, `date`, `project_id`, `type`, `quantity`, `supporter_id`, `usage`, `indicator_id`, `material_name`, `unit`) VALUES
-(15, '2026-10-23', 11, 'Dinheiro', 100.00, 25, '100 reais no pix', 3, NULL, NULL),
-(16, '2026-10-23', 11, 'Voluntariado', 6.00, 26, 'catando lixo', 3, NULL, NULL),
-(17, '2026-10-23', 11, 'Material', 1.00, 25, 'sofa de couro', 3, 'sofa', 'unidade');
+(15, '2026-10-23', 11, 'Dinheiro', 100.00, NULL, '100 reais no pix', 3, NULL, NULL),
+(17, '2026-10-23', 11, 'Material', 1.00, NULL, 'sofa de couro', 3, 'sofa', 'unidade'),
+(18, '2007-10-25', 11, 'Dinheiro', 100.00, NULL, '', NULL, NULL, NULL),
+(19, '2026-10-29', 11, 'Dinheiro', 100.00, 28, 'jorgebem', 4, NULL, NULL);
+
+-- --------------------------------------------------------
+
+--
+-- Estrutura para tabela `resource_allocations`
+--
+
+CREATE TABLE `resource_allocations` (
+  `id` bigint(20) UNSIGNED NOT NULL,
+  `project_id` bigint(20) UNSIGNED NOT NULL,
+  `date` date NOT NULL,
+  `type` varchar(40) NOT NULL,
+  `quantity` decimal(15,2) NOT NULL,
+  `material_name` varchar(200) DEFAULT NULL,
+  `unit` varchar(20) DEFAULT NULL,
+  `description` varchar(2000) NOT NULL,
+  `created_by` bigint(20) UNSIGNED DEFAULT NULL,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp()
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+--
+-- Despejando dados para a tabela `resource_allocations`
+--
+
+INSERT INTO `resource_allocations` (`id`, `project_id`, `date`, `type`, `quantity`, `material_name`, `unit`, `description`, `created_by`, `created_at`) VALUES
+(1, 11, '2026-10-25', 'Material', 1.00, 'sofa', 'unidade', 'penes', 5, '2026-10-26 19:18:50');
 
 -- --------------------------------------------------------
 
@@ -166,8 +195,8 @@ CREATE TABLE `supporters` (
 --
 
 INSERT INTO `supporters` (`id`, `name`, `type`, `public_token`, `public_name_allowed`) VALUES
-(25, 'Rian', 'Pessoa', 'b99904e46657452457ab95be3c8ade6d', 1),
-(26, 'Micao', 'Pessoa', '969e4320675fc64a818d730eadfe20fc', 1);
+(27, 'jorgibem', 'Pessoa', '354953b3bd9605c3df47d415f331e4a3', 0),
+(28, 'jorgebem', 'Pessoa', '426bcde798b3eb685e021fa7c6c1ab72', 0);
 
 -- --------------------------------------------------------
 
@@ -198,9 +227,7 @@ CREATE TABLE `support_requests` (
 --
 
 INSERT INTO `support_requests` (`id`, `supporter_id`, `project_id`, `indicator_id`, `type`, `quantity`, `description`, `evidence_url`, `status`, `resource_id`, `reviewed_by`, `created_at`, `reviewed_at`, `material_name`, `unit`) VALUES
-(11, 25, 11, 3, 'Dinheiro', 100.00, '100 reais no pix', '1308313da298b1a19c8d724233328b74.png', 'approved', 15, 5, '2026-10-23 19:38:21', '2026-10-23 19:43:58', NULL, NULL),
-(12, 25, 11, 3, 'Material', 1.00, 'sofa de couro', 'c3d68fbc899fa2ac0084ff24a7c9a51c.png', 'approved', 17, 5, '2026-10-23 19:40:44', '2026-10-23 20:15:26', 'sofa', 'unidade'),
-(13, 26, 11, 3, 'Voluntariado', 6.00, 'catando lixo', '88d90365f0ac7aa74e3b166e28a49afc.png', 'approved', 16, 5, '2026-10-23 19:41:29', '2026-10-23 19:44:14', NULL, NULL);
+(14, 28, 11, 4, 'Dinheiro', 100.00, 'jorgebem', '216b1c3db883a8b7ee3bcc08c6f57a7b.jpg', 'approved', 19, 5, '2026-10-29 17:52:17', '2026-10-29 17:53:05', NULL, NULL);
 
 -- --------------------------------------------------------
 
@@ -228,8 +255,10 @@ CREATE TABLE `users` (
 INSERT INTO `users` (`id`, `email`, `password_hash`, `role`, `display_name`, `organization`, `supporter_id`, `created_at`, `preferences`, `avatar_url`) VALUES
 (1, 'luiz4edu@outlook.com', '$2y$10$oPqs1A0LeqJt1Pvdxn8nW.P35H5SIwD9.SqR1eCclwbirdwv026TW', 'admin', 'luiz4edu', NULL, NULL, '2026-10-15 19:59:32', '{}', NULL),
 (5, 'admin@uoscc.local', '$2y$10$S.oHDiHBMHZcIvMMwApxQupT4DsuzPXXXDxG9E7TPfEdV8/EKqzDS', 'admin', 'admin', NULL, NULL, '2026-10-19 18:56:43', '{\"theme\":\"light\",\"hiddenCards\":[],\"menuOrder\":[\"dashboard\",\"apoiador\",\"projetos\",\"apoiadores\",\"financeiro\",\"metas\",\"evidencias\",\"relatorios\",\"publico\",\"contas\",\"configuracoes\",\"conta\"],\"cardOrder\":[\"dinheiro\",\"voluntariado\",\"pessoas\",\"metas\",\"evidencias\"]}', NULL),
-(33, 'rian456@outlook.com', '$2y$10$wrodzsmU8JOspkHVCU.uJOLBTrLvywtBqdPvLQtsRNZ0NZHnoOcQS', 'supporter', 'Rian', NULL, 25, '2026-10-23 18:32:20', '{\"theme\":\"light\",\"hiddenCards\":[],\"menuOrder\":[\"apoiador\",\"dashboard\",\"projetos\",\"apoiadores\",\"financeiro\",\"metas\",\"evidencias\",\"relatorios\",\"conta\",\"publico\",\"configuracoes\",\"contas\"],\"cardOrder\":[]}', '../uploads/avatars/7ccc323b10354b915abbbe014762e568.jpg'),
-(34, 'micao456@gmail.com', '$2y$10$ABpzO5frLVzXl8jRDGV5teCxZAvMbzMiCQHjqvRdA6Qf.VFDaAIaq', 'supporter', 'Micao', NULL, 26, '2026-10-23 18:32:34', NULL, '../uploads/avatars/5a37e187c2ec067b0ffa6f72aee5ac12.png');
+(35, 'jorgibem12@gmail.com', '$2y$10$Ismoe2dBW/WntT6QInOwf.OdDGa0n75uQNYYxZSe9.kG3LUmgDrx6', 'supporter', 'jorgibem', NULL, 27, '2026-10-29 17:36:36', NULL, NULL),
+(36, 'oscparkverde@gmail.com', '$2y$10$MLXhUFs.TwpnodL19JPIPuAZgoZ6eBSGzB1vvajwQYKrTJhN1vFJy', 'osc', NULL, 'Meio ambiente e sustentabilidade', NULL, '2026-10-29 17:42:36', NULL, NULL),
+(42, 'jorgebem@gmail.com', '$2y$10$u0U/o.ivJO/5ZGt34cxpleT2lbCFLg2HGVtNkab.tZiEj/EbPiDL6', 'supporter', 'jorgebem', NULL, 28, '2026-10-29 17:51:50', NULL, NULL),
+(43, 'cleiton123@gmail.com', '$2y$10$ek7mN0Tip53MqV52K0ksau1/1gHRvm4oEfc22srMhofb7AnQvB1HW', 'admin', NULL, NULL, NULL, '2026-10-29 17:59:50', NULL, '../uploads/avatars/42e33e09d39569a464a00090b535f07e.jpg');
 
 --
 -- Índices para tabelas despejadas
@@ -284,6 +313,14 @@ ALTER TABLE `resources`
   ADD KEY `idx_resources_indicator` (`indicator_id`);
 
 --
+-- Índices de tabela `resource_allocations`
+--
+ALTER TABLE `resource_allocations`
+  ADD PRIMARY KEY (`id`),
+  ADD KEY `idx_resource_allocations_project_date` (`project_id`,`date`),
+  ADD KEY `fk_resource_allocations_creator` (`created_by`);
+
+--
 -- Índices de tabela `supporters`
 --
 ALTER TABLE `supporters`
@@ -324,7 +361,7 @@ ALTER TABLE `evidences`
 -- AUTO_INCREMENT de tabela `indicators`
 --
 ALTER TABLE `indicators`
-  MODIFY `id` bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=4;
+  MODIFY `id` bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=5;
 
 --
 -- AUTO_INCREMENT de tabela `people_served`
@@ -336,7 +373,7 @@ ALTER TABLE `people_served`
 -- AUTO_INCREMENT de tabela `projects`
 --
 ALTER TABLE `projects`
-  MODIFY `id` bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=12;
+  MODIFY `id` bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=13;
 
 --
 -- AUTO_INCREMENT de tabela `report_notes`
@@ -348,25 +385,31 @@ ALTER TABLE `report_notes`
 -- AUTO_INCREMENT de tabela `resources`
 --
 ALTER TABLE `resources`
-  MODIFY `id` bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=18;
+  MODIFY `id` bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=20;
+
+--
+-- AUTO_INCREMENT de tabela `resource_allocations`
+--
+ALTER TABLE `resource_allocations`
+  MODIFY `id` bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=2;
 
 --
 -- AUTO_INCREMENT de tabela `supporters`
 --
 ALTER TABLE `supporters`
-  MODIFY `id` bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=27;
+  MODIFY `id` bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=29;
 
 --
 -- AUTO_INCREMENT de tabela `support_requests`
 --
 ALTER TABLE `support_requests`
-  MODIFY `id` bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=14;
+  MODIFY `id` bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=15;
 
 --
 -- AUTO_INCREMENT de tabela `users`
 --
 ALTER TABLE `users`
-  MODIFY `id` bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=35;
+  MODIFY `id` bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=44;
 
 --
 -- Restrições para tabelas despejadas
@@ -404,6 +447,13 @@ ALTER TABLE `resources`
   ADD CONSTRAINT `fk_resources_indicator` FOREIGN KEY (`indicator_id`) REFERENCES `indicators` (`id`) ON DELETE SET NULL,
   ADD CONSTRAINT `fk_resources_project` FOREIGN KEY (`project_id`) REFERENCES `projects` (`id`),
   ADD CONSTRAINT `fk_resources_supporter` FOREIGN KEY (`supporter_id`) REFERENCES `supporters` (`id`) ON DELETE SET NULL;
+
+--
+-- Restrições para tabelas `resource_allocations`
+--
+ALTER TABLE `resource_allocations`
+  ADD CONSTRAINT `fk_resource_allocations_creator` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`) ON DELETE SET NULL,
+  ADD CONSTRAINT `fk_resource_allocations_project` FOREIGN KEY (`project_id`) REFERENCES `projects` (`id`) ON DELETE CASCADE;
 
 --
 -- Restrições para tabelas `support_requests`

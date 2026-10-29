@@ -85,6 +85,22 @@ CREATE TABLE IF NOT EXISTS resources (
     CONSTRAINT fk_resources_indicator FOREIGN KEY (indicator_id) REFERENCES indicators(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS resource_allocations (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    project_id BIGINT UNSIGNED NOT NULL,
+    date DATE NOT NULL,
+    type VARCHAR(40) NOT NULL,
+    quantity DECIMAL(15, 2) NOT NULL,
+    material_name VARCHAR(200) NULL,
+    unit VARCHAR(20) NULL,
+    description VARCHAR(2000) NOT NULL,
+    created_by BIGINT UNSIGNED NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_resource_allocations_project_date (project_id, date),
+    CONSTRAINT fk_resource_allocations_project FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+    CONSTRAINT fk_resource_allocations_creator FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS evidences (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
     project_id BIGINT UNSIGNED NOT NULL,

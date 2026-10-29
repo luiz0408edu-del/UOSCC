@@ -71,9 +71,18 @@ function current_user(): array
 function require_role(array $roles): void
 {
     require_login();
-    if (!in_array(current_user()['role'], $roles, true)) {
+    $role = current_user()['role'];
+    if (is_osc_role($role) && trim((string) current_user()['organization']) === '') {
+        respond(['error' => 'A conta OSC não possui uma área de atuação válida.'], 403);
+    }
+    if (!in_array($role, $roles, true) && !($role === 'osc_admin' && in_array('osc', $roles, true))) {
         respond(['error' => 'Seu perfil não tem permissão para esta operação.'], 403);
     }
+}
+
+function is_osc_role(string $role): bool
+{
+    return in_array($role, ['osc', 'osc_admin'], true);
 }
 
 function osc_areas(): array
@@ -91,7 +100,10 @@ function osc_areas(): array
 function scoped_filters(array $filters): array
 {
     $user = current_user();
-    if ($user['role'] === 'osc') {
+    if (is_osc_role($user['role'])) {
+        if (trim((string) $user['organization']) === '') {
+            respond(['error' => 'A conta OSC não possui uma área de atuação válida.'], 403);
+        }
         $filters['organization'] = $user['organization'];
     }
     return $filters;
@@ -203,7 +215,8 @@ function entity_rows(PDO $pdo, string $entity, array $filters = []): array
         'projects' => "SELECT p.id, p.name, p.organization,
             p.accepted_resources,
             (SELECT COUNT(*) FROM indicators i WHERE i.project_id = p.id{$projectIndicatorWhere}) AS indicators,
-            (SELECT COALESCE(SUM(r.quantity), 0) FROM resources r WHERE r.project_id = p.id AND r.type = 'Dinheiro'{$projectResourceWhere}) AS received
+            (SELECT COALESCE(SUM(r.quantity), 0) FROM resources r WHERE r.project_id = p.id AND r.type = 'Dinheiro'{$projectResourceWhere}) AS received,
+            (SELECT COALESCE(SUM(r.quantity), 0) FROM resources r WHERE r.project_id = p.id AND r.type = 'Voluntariado'{$projectResourceWhere}) AS volunteer_hours
             FROM projects p{$whereSql} ORDER BY p.name",
         'supporters' => "SELECT s.id, s.name, s.type, s.public_name_allowed,
             s.public_token, COALESCE(SUM(r.quantity), 0) AS total
@@ -237,7 +250,7 @@ function entity_rows(PDO $pdo, string $entity, array $filters = []): array
     }
     $statement = $pdo->prepare($queries[$entity]);
     $statement->execute($entity === 'projects'
-        ? [...$projectIndicatorValues, ...$projectResourceValues, ...$values]
+        ? [...$projectIndicatorValues, ...$projectResourceValues, ...$projectResourceValues, ...$values]
         : ($entity === 'indicators' ? [...$linkedResourceValues, ...$values] : $values));
     $rows = $statement->fetchAll();
     if ($entity === 'projects') {
@@ -250,6 +263,86 @@ function entity_rows(PDO $pdo, string $entity, array $filters = []): array
         unset($row);
     }
     return $rows;
+}
+
+function resource_allocation_rows(PDO $pdo, array $filters = []): array
+{
+    [$dateWhere, $dateValues] = date_filters('a', $filters);
+    [$organizationWhere, $organizationValues] = organization_filter('p', $filters);
+    $where = [...$dateWhere, ...$organizationWhere];
+    $whereSql = $where ? ' WHERE ' . implode(' AND ', $where) : '';
+    $statement = $pdo->prepare("SELECT a.id, a.project_id, p.name AS project, p.organization, a.date, a.type, a.quantity, a.material_name, a.unit, a.description
+        FROM resource_allocations a JOIN projects p ON p.id = a.project_id{$whereSql}
+        ORDER BY a.date DESC, a.id DESC");
+    $statement->execute([...$dateValues, ...$organizationValues]);
+    return $statement->fetchAll();
+}
+
+function resource_balance_rows(PDO $pdo, array $filters = []): array
+{
+    $endDate = $filters['to'] ?? (new DateTimeImmutable('today'))->format('Y-m-d');
+    [$organizationWhere, $organizationValues] = organization_filter('p', $filters);
+    $organizationSql = $organizationWhere ? ' AND ' . implode(' AND ', $organizationWhere) : '';
+    $resources = $pdo->prepare("SELECT p.id AS project_id, p.name AS project, p.organization, r.type, r.material_name, r.unit, SUM(r.quantity) AS quantity
+        FROM resources r JOIN projects p ON p.id = r.project_id
+        WHERE r.type IN ('Dinheiro', 'Material') AND r.date <= ?{$organizationSql}
+        GROUP BY p.id, p.name, p.organization, r.type, r.material_name, r.unit");
+    $resources->execute([$endDate, ...$organizationValues]);
+    $balances = [];
+    foreach ($resources->fetchAll() as $row) {
+        $key = implode("\0", [$row['project_id'], $row['type'], $row['material_name'] ?? '', $row['unit'] ?? '']);
+        $balances[$key] = [
+            'project_id' => (int) $row['project_id'],
+            'project' => $row['project'],
+            'organization' => $row['organization'],
+            'type' => $row['type'],
+            'material_name' => $row['material_name'],
+            'unit' => $row['unit'],
+            'received' => (float) $row['quantity'],
+            'allocated' => 0.0,
+        ];
+    }
+
+    $allocations = $pdo->prepare("SELECT a.project_id, a.type, a.material_name, a.unit, SUM(a.quantity) AS quantity
+        FROM resource_allocations a JOIN projects p ON p.id = a.project_id
+        WHERE a.date <= ?{$organizationSql}
+        GROUP BY a.project_id, a.type, a.material_name, a.unit");
+    $allocations->execute([$endDate, ...$organizationValues]);
+    foreach ($allocations->fetchAll() as $row) {
+        $key = implode("\0", [$row['project_id'], $row['type'], $row['material_name'] ?? '', $row['unit'] ?? '']);
+        if (isset($balances[$key])) {
+            $balances[$key]['allocated'] = (float) $row['quantity'];
+        }
+    }
+
+    foreach ($balances as &$balance) {
+        $balance['balance'] = $balance['received'] - $balance['allocated'];
+    }
+    unset($balance);
+    return array_values($balances);
+}
+
+function resource_allocations_overdrawn(PDO $pdo, int $projectId): bool
+{
+    $allocations = $pdo->prepare('SELECT date, type, material_name, unit FROM resource_allocations WHERE project_id = ? ORDER BY date, id');
+    $allocations->execute([$projectId]);
+    $receivedQuery = $pdo->prepare("SELECT COALESCE(SUM(quantity), 0) FROM resources
+        WHERE project_id = ? AND type = ? AND date <= ?
+        AND COALESCE(material_name, '') = ? AND COALESCE(unit, '') = ?");
+    $allocatedQuery = $pdo->prepare("SELECT COALESCE(SUM(quantity), 0) FROM resource_allocations
+        WHERE project_id = ? AND type = ? AND date <= ?
+        AND COALESCE(material_name, '') = ? AND COALESCE(unit, '') = ?");
+    foreach ($allocations->fetchAll() as $allocation) {
+        $materialName = (string) ($allocation['material_name'] ?? '');
+        $unit = (string) ($allocation['unit'] ?? '');
+        $parameters = [$projectId, $allocation['type'], $allocation['date'], $materialName, $unit];
+        $receivedQuery->execute($parameters);
+        $allocatedQuery->execute($parameters);
+        if ((float) $allocatedQuery->fetchColumn() > (float) $receivedQuery->fetchColumn() + 0.000001) {
+            return true;
+        }
+    }
+    return false;
 }
 
 function dashboard_data(PDO $pdo, array $filters = []): array

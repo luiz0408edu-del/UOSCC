@@ -237,6 +237,7 @@ try {
         FROM evidences e JOIN projects p ON p.id = e.project_id' . $evidenceWhereSql . ' ORDER BY e.date DESC, e.id DESC');
         $publicEvidencesQuery->execute([...$evidenceValues, ...$evidenceOrganizationValues]);
         $publicEvidences = $publicEvidencesQuery->fetchAll();
+        $publicAllocations = resource_allocation_rows($pdo, $filters);
         $donation = null;
         $token = (string) ($_GET['token'] ?? '');
         if ($token !== '') {
@@ -262,6 +263,8 @@ try {
             'projects' => entity_rows($pdo, 'projects', $filters),
             'resources' => $publicResources,
             'evidences' => $publicEvidences,
+            'allocations' => $publicAllocations,
+            'resourceBalances' => resource_balance_rows($pdo, $filters),
             'rankings' => supporter_rankings($pdo),
             'organizations' => $pdo->query('SELECT DISTINCT organization FROM projects ORDER BY organization')->fetchAll(PDO::FETCH_COLUMN),
             'donation' => $donation,
@@ -429,7 +432,7 @@ try {
         }
         $sql = 'UPDATE people_served SET quantity = quantity + ? WHERE id = ? AND quantity <= 4294967295 - ?';
         $values = [$increment, $id, $increment];
-        if ($user['role'] === 'osc') {
+        if (is_osc_role($user['role'])) {
             $sql .= ' AND project_id IN (SELECT id FROM projects WHERE organization = ?)';
             $values[] = $user['organization'];
         }
@@ -454,7 +457,7 @@ try {
             respond(['error' => 'Comprovante não encontrado.'], 404);
         }
         $user = current_user();
-        if (($user['role'] === 'supporter' && $user['supporter_id'] !== (int) $request['supporter_id']) || ($user['role'] === 'osc' && $user['organization'] !== $request['organization'])) {
+        if (($user['role'] === 'supporter' && $user['supporter_id'] !== (int) $request['supporter_id']) || (is_osc_role($user['role']) && $user['organization'] !== $request['organization'])) {
             respond(['error' => 'Você não tem acesso a este comprovante.'], 403);
         }
         $filename = (string) $request['evidence_url'];
@@ -542,13 +545,49 @@ try {
         if (!in_array($name, osc_areas(), true) || !filter_var($email, FILTER_VALIDATE_EMAIL) || strlen($password) < 12) {
             respond(['error' => 'Selecione uma das seis áreas, informe e-mail válido e senha com pelo menos 12 caracteres.'], 422);
         }
-        $organizationExists = $pdo->prepare('SELECT COUNT(*) FROM users WHERE role = ? AND organization = ?');
-        $organizationExists->execute(['osc', $name]);
-        if ((int) $organizationExists->fetchColumn() > 0) {
-            respond(['error' => 'Já existe uma conta OSC vinculada a essa área.'], 409);
-        }
         $statement = $pdo->prepare('INSERT INTO users (email, password_hash, role, organization) VALUES (?, ?, ?, ?)');
         $statement->execute([$email, password_hash($password, PASSWORD_DEFAULT), 'osc', $name]);
+        respond(['created' => true], 201);
+    }
+
+    if ($action === 'osc-accounts' && $method === 'GET') {
+        require_role(['admin']);
+        $accounts = $pdo->query("SELECT id, email, role, organization FROM users WHERE role IN ('osc', 'osc_admin') ORDER BY organization, email")->fetchAll();
+        foreach ($accounts as &$account) {
+            $account['id'] = (int) $account['id'];
+            $account['roleLabel'] = $account['role'] === 'osc_admin' ? 'Administrador local' : 'OSC';
+        }
+        unset($account);
+        respond($accounts);
+    }
+
+    if ($action === 'reset-osc-password' && $method === 'POST') {
+        require_role(['admin']);
+        $input = request_data();
+        $userId = filter_var($input['id'] ?? null, FILTER_VALIDATE_INT);
+        $password = (string) ($input['password'] ?? '');
+        if ($userId === false || $userId < 1 || strlen($password) < 12) {
+            respond(['error' => 'Selecione uma conta válida e informe uma senha com pelo menos 12 caracteres.'], 422);
+        }
+        $statement = $pdo->prepare("UPDATE users SET password_hash = ? WHERE id = ? AND role IN ('osc', 'osc_admin')");
+        $statement->execute([password_hash($password, PASSWORD_DEFAULT), $userId]);
+        if ($statement->rowCount() !== 1) {
+            respond(['error' => 'A conta OSC não foi encontrada.'], 404);
+        }
+        respond(['updated' => true]);
+    }
+
+    if ($action === 'create-osc-admin-account' && $method === 'POST') {
+        require_role(['admin']);
+        $input = request_data();
+        $organization = trim((string) ($input['organization'] ?? ''));
+        $email = strtolower(trim((string) ($input['email'] ?? '')));
+        $password = (string) ($input['password'] ?? '');
+        if (!in_array($organization, osc_areas(), true) || !filter_var($email, FILTER_VALIDATE_EMAIL) || strlen($password) < 12) {
+            respond(['error' => 'Selecione uma das seis áreas, informe e-mail válido e senha com pelo menos 12 caracteres.'], 422);
+        }
+        $statement = $pdo->prepare('INSERT INTO users (email, password_hash, role, organization) VALUES (?, ?, ?, ?)');
+        $statement->execute([$email, password_hash($password, PASSWORD_DEFAULT), 'osc_admin', $organization]);
         respond(['created' => true], 201);
     }
 
@@ -600,7 +639,7 @@ try {
         require_role(['admin', 'osc']);
         $query = 'SELECT sr.id, sr.project_id, sr.indicator_id, sr.type, sr.quantity, sr.material_name, sr.unit, sr.description, sr.evidence_url, sr.created_at, s.name AS supporter, p.name AS project, p.organization, i.name AS indicator FROM support_requests sr JOIN supporters s ON s.id = sr.supporter_id JOIN projects p ON p.id = sr.project_id LEFT JOIN indicators i ON i.id = sr.indicator_id WHERE sr.status = ?';
         $values = ['pending'];
-        if (current_user()['role'] === 'osc') {
+        if (is_osc_role(current_user()['role'])) {
             $query .= ' AND p.organization = ?';
             $values[] = current_user()['organization'];
         }
@@ -631,7 +670,7 @@ try {
             $pdo->rollBack();
             respond(['error' => 'Esta solicitação não está mais pendente.'], 409);
         }
-        if (current_user()['role'] === 'osc' && $supportRequest['organization'] !== current_user()['organization']) {
+        if (is_osc_role(current_user()['role']) && $supportRequest['organization'] !== current_user()['organization']) {
             $pdo->rollBack();
             respond(['error' => 'Esta solicitação pertence a outra OSC.'], 403);
         }
@@ -671,10 +710,68 @@ try {
         $filters = public_filters($_GET);
         respond(dashboard_data($pdo, scoped_filters($filters)));
     }
+    if ($action === 'allocate-resource' && $method === 'POST') {
+        require_role(['admin', 'osc_admin']);
+        $input = request_data();
+        $projectId = filter_var($input['project_id'] ?? null, FILTER_VALIDATE_INT);
+        $date = trim((string) ($input['date'] ?? ''));
+        $type = trim((string) ($input['type'] ?? ''));
+        $quantityInput = $input['quantity'] ?? null;
+        $quantityText = is_string($quantityInput) || is_numeric($quantityInput) ? (string) $quantityInput : '';
+        $quantity = preg_match('/^\d{1,13}(?:\.\d{1,2})?$/D', $quantityText) ? (float) $quantityText : false;
+        $materialName = trim((string) ($input['material_name'] ?? ''));
+        $unit = trim((string) ($input['unit'] ?? ''));
+        $description = trim((string) ($input['description'] ?? ''));
+        $parsedDate = DateTimeImmutable::createFromFormat('!Y-m-d', $date);
+        $dateErrors = DateTimeImmutable::getLastErrors();
+        if (!$parsedDate || ($dateErrors && ($dateErrors['warning_count'] > 0 || $dateErrors['error_count'] > 0)) || $parsedDate->format('Y-m-d') !== $date) {
+            respond(['error' => 'Informe uma data válida para a destinação.'], 422);
+        }
+        if ($projectId === false || $projectId < 1 || !in_array($type, ['Dinheiro', 'Material'], true) || $quantity === false || $quantity <= 0 || $description === '' || strlen($description) > 2000) {
+            respond(['error' => 'Informe projeto, tipo, quantidade positiva e descrição válida para a destinação.'], 422);
+        }
+        if ($type === 'Material' && ($materialName === '' || strlen($materialName) > 200 || !in_array($unit, ['kg', 'g', 'litro', 'ml', 'unidade', 'peça', 'caixa', 'pacote'], true))) {
+            respond(['error' => 'Informe o material e selecione uma unidade válida.'], 422);
+        }
+        if ($type === 'Dinheiro') {
+            $materialName = '';
+            $unit = '';
+        }
+
+        $pdo->beginTransaction();
+        $driver = $pdo->getAttribute(PDO::ATTR_DRIVER_NAME);
+        $projectQuery = $pdo->prepare('SELECT id FROM projects WHERE id = ?' . (is_osc_role(current_user()['role']) ? ' AND organization = ?' : '') . ($driver === 'mysql' ? ' FOR UPDATE' : ''));
+        $projectQuery->execute(is_osc_role(current_user()['role']) ? [$projectId, current_user()['organization']] : [$projectId]);
+        if (!$projectQuery->fetchColumn()) {
+            $pdo->rollBack();
+            respond(['error' => 'Selecione um projeto válido.'], 422);
+        }
+        $resourceQuery = $pdo->prepare("SELECT COALESCE(SUM(quantity), 0) FROM resources
+            WHERE project_id = ? AND type = ? AND date <= ?
+            AND COALESCE(material_name, '') = ? AND COALESCE(unit, '') = ?");
+        $resourceQuery->execute([$projectId, $type, $date, $materialName, $unit]);
+        $received = (float) $resourceQuery->fetchColumn();
+        $allocationQuery = $pdo->prepare("SELECT COALESCE(SUM(quantity), 0) FROM resource_allocations
+            WHERE project_id = ? AND type = ? AND date <= ?
+            AND COALESCE(material_name, '') = ? AND COALESCE(unit, '') = ?");
+        $allocationQuery->execute([$projectId, $type, $date, $materialName, $unit]);
+        $alreadyAllocated = (float) $allocationQuery->fetchColumn();
+        if ($quantity > $received - $alreadyAllocated + 0.000001) {
+            $pdo->rollBack();
+            respond(['error' => 'A quantidade informada ultrapassa o saldo disponível para este projeto e recurso.'], 422);
+        }
+        $insert = $pdo->prepare('INSERT INTO resource_allocations (project_id, date, type, quantity, material_name, unit, description, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+        $insert->execute([$projectId, $date, $type, $quantity, $materialName === '' ? null : $materialName, $unit === '' ? null : $unit, $description, current_user()['id']]);
+        $pdo->commit();
+        respond(['created' => true, 'id' => (int) $pdo->lastInsertId()], 201);
+    }
     if ($action === 'save-report-note' && $method === 'POST') {
-        require_role(['admin']);
+        require_role(['admin', 'osc_admin']);
         $input = request_data();
         $organization = trim((string) ($input['organization'] ?? ''));
+        if (is_osc_role(current_user()['role'])) {
+            $organization = (string) current_user()['organization'];
+        }
         $periodStart = trim((string) ($input['from'] ?? ''));
         $periodEnd = trim((string) ($input['to'] ?? ''));
         $title = trim((string) ($input['title'] ?? ''));
@@ -737,6 +834,8 @@ try {
             'indicators' => entity_rows($pdo, 'indicators', $filters),
             'peopleServed' => entity_rows($pdo, 'people_served', $filters),
             'evidences' => entity_rows($pdo, 'evidences', $filters),
+            'allocations' => resource_allocation_rows($pdo, $filters),
+            'resourceBalances' => resource_balance_rows($pdo, $filters),
         ]);
     }
 
@@ -749,7 +848,7 @@ try {
     if ($role === 'supporter') {
         respond(['error' => 'Use a área de acompanhamento do apoiador.'], 403);
     }
-    if ($role === 'osc' && !in_array($entity, ['projects', 'resources', 'indicators', 'people_served', 'evidences'], true)) {
+    if (is_osc_role($role) && !in_array($entity, ['projects', 'resources', 'indicators', 'people_served', 'evidences'], true)) {
         respond(['error' => 'Sua conta OSC não tem acesso a este cadastro.'], 403);
     }
 
@@ -774,7 +873,7 @@ try {
         }
         foreach ($entityFields as $field) {
             $value = $input[$field] ?? null;
-            if ($role === 'osc' && $entity === 'projects' && $field === 'organization') {
+            if (is_osc_role($role) && $entity === 'projects' && $field === 'organization') {
                 $value = current_user()['organization'];
             }
             if ($entity === 'projects' && $field === 'accepted_resources') {
@@ -841,10 +940,10 @@ try {
             $values[$field] = $value;
         }
 
-        if ($role === 'osc' && $entity === 'projects') {
+        if (is_osc_role($role) && $entity === 'projects') {
             $values['organization'] = current_user()['organization'];
         }
-        if ($role === 'osc' && $entity === 'resources') {
+        if (is_osc_role($role) && $entity === 'resources') {
             $values['supporter_id'] = null;
         }
         if ($entity === 'projects' && !in_array($values['organization'], osc_areas(), true)) {
@@ -883,7 +982,7 @@ try {
                 respond(['error' => 'O indicador selecionado não pertence ao projeto.'], 422);
             }
         }
-        if ($role === 'osc' && in_array($entity, ['resources', 'indicators', 'evidences', 'people_served'], true)) {
+        if (is_osc_role($role) && in_array($entity, ['resources', 'indicators', 'evidences', 'people_served'], true)) {
             $projectCheck = $pdo->prepare('SELECT COUNT(*) FROM projects WHERE id = ? AND organization = ?');
             $projectCheck->execute([$values['project_id'], current_user()['organization']]);
             if ((int) $projectCheck->fetchColumn() !== 1) {
@@ -916,14 +1015,42 @@ try {
         $assignments = array_map(static fn (string $field): string => '`' . $field . '` = ?', array_keys($values));
         $scopeSql = '';
         $scopeValues = [];
-        if ($role === 'osc') {
+        if (is_osc_role($role)) {
             $scopeSql = $entity === 'projects'
                 ? ' AND organization = ?'
                 : ' AND project_id IN (SELECT id FROM projects WHERE organization = ?)';
             $scopeValues[] = current_user()['organization'];
         }
+        $affectedProjectIds = [];
+        if ($entity === 'resources') {
+            $existingResource = $pdo->prepare('SELECT project_id FROM resources WHERE id = ?' . (is_osc_role($role) ? ' AND project_id IN (SELECT id FROM projects WHERE organization = ?)' : ''));
+            $existingResource->execute(is_osc_role($role) ? [$id, current_user()['organization']] : [$id]);
+            $existingProjectId = $existingResource->fetchColumn();
+            if ($existingProjectId !== false) {
+                $affectedProjectIds = array_values(array_unique([(int) $existingProjectId, (int) $values['project_id']]));
+                sort($affectedProjectIds);
+                $pdo->beginTransaction();
+                if ($pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'mysql') {
+                    $lockProject = $pdo->prepare('SELECT id FROM projects WHERE id = ? FOR UPDATE');
+                    foreach ($affectedProjectIds as $affectedProjectId) {
+                        $lockProject->execute([$affectedProjectId]);
+                    }
+                }
+            }
+        }
         $statement = $pdo->prepare('UPDATE ' . $definition['table'] . ' SET ' . implode(', ', $assignments) . ' WHERE id = ?' . $scopeSql);
         $statement->execute([...array_values($values), $id, ...$scopeValues]);
+        if ($affectedProjectIds && $statement->rowCount() > 0) {
+            foreach ($affectedProjectIds as $affectedProjectId) {
+                if (resource_allocations_overdrawn($pdo, $affectedProjectId)) {
+                    $pdo->rollBack();
+                    respond(['error' => 'A alteração deixaria uma destinação acima do saldo recebido. Ajuste as destinações antes de editar este recurso.'], 409);
+                }
+            }
+        }
+        if ($affectedProjectIds && $pdo->inTransaction()) {
+            $pdo->commit();
+        }
         respond(['updated' => $statement->rowCount() > 0]);
     }
 
@@ -934,14 +1061,35 @@ try {
         }
         $scopeSql = '';
         $scopeValues = [];
-        if ($role === 'osc') {
+        if (is_osc_role($role)) {
             $scopeSql = $entity === 'projects'
                 ? ' AND organization = ?'
                 : ' AND project_id IN (SELECT id FROM projects WHERE organization = ?)';
             $scopeValues[] = current_user()['organization'];
         }
+        $projectId = null;
+        if ($entity === 'resources') {
+            $existingResource = $pdo->prepare('SELECT project_id FROM resources WHERE id = ?' . (is_osc_role($role) ? ' AND project_id IN (SELECT id FROM projects WHERE organization = ?)' : ''));
+            $existingResource->execute(is_osc_role($role) ? [$id, current_user()['organization']] : [$id]);
+            $existingProjectId = $existingResource->fetchColumn();
+            if ($existingProjectId !== false) {
+                $projectId = (int) $existingProjectId;
+                $pdo->beginTransaction();
+                if ($pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'mysql') {
+                    $lockProject = $pdo->prepare('SELECT id FROM projects WHERE id = ? FOR UPDATE');
+                    $lockProject->execute([$projectId]);
+                }
+            }
+        }
         $statement = $pdo->prepare('DELETE FROM ' . $definition['table'] . ' WHERE id = ?' . $scopeSql);
         $statement->execute([$id, ...$scopeValues]);
+        if ($projectId !== null && $statement->rowCount() > 0 && resource_allocations_overdrawn($pdo, $projectId)) {
+            $pdo->rollBack();
+            respond(['error' => 'Este recurso não pode ser excluído porque há destinações vinculadas ao saldo recebido.'], 409);
+        }
+        if ($projectId !== null && $pdo->inTransaction()) {
+            $pdo->commit();
+        }
         respond(['deleted' => $statement->rowCount() > 0]);
     }
 
